@@ -28,7 +28,7 @@ from huggingface_hub import HfApi
 from packaging import version
 from torch import Tensor, device, nn
 from tqdm.autonotebook import trange
-from transformers import is_torch_npu_available
+from transformers import PreTrainedModel, is_torch_npu_available
 from transformers.dynamic_module_utils import get_class_from_dynamic_module, get_relative_import_files
 
 from sentence_transformers.model_card import SentenceTransformerModelCardData, generate_model_card
@@ -190,7 +190,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         self.module_kwargs = None
         self._model_card_vars = {}
         self._model_card_text = None
-        self._model_config = {}
+        self._model_config = {"model_type": self.__class__.__name__}
         self.backend = backend
         if use_auth_token is not None:
             warnings.warn(
@@ -216,7 +216,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
             adapt_transformers_to_gaudi()
 
         if model_name_or_path is not None and model_name_or_path != "":
-            logger.info(f"Load pretrained SentenceTransformer: {model_name_or_path}")
+            logger.info(f"Load pretrained {self.__class__.__name__}: {model_name_or_path}")
 
             # Old models that don't belong to any organization
             basic_transformer_models = [
@@ -299,12 +299,22 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
                     # A model from sentence-transformers
                     model_name_or_path = __MODEL_HUB_ORGANIZATION__ + "/" + model_name_or_path
 
-            if is_sentence_transformer_model(
-                model_name_or_path,
-                token,
-                cache_folder=cache_folder,
-                revision=revision,
-                local_files_only=local_files_only,
+            if (
+                is_sentence_transformer_model(
+                    model_name_or_path,
+                    token,
+                    cache_folder=cache_folder,
+                    revision=revision,
+                    local_files_only=local_files_only,
+                )
+                and self._get_model_type(
+                    model_name_or_path,
+                    token,
+                    cache_folder=cache_folder,
+                    revision=revision,
+                    local_files_only=local_files_only,
+                )
+                == self._model_config["model_type"]
             ):
                 modules, self.module_kwargs = self._load_sbert_model(
                     model_name_or_path,
@@ -749,12 +759,19 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         return all_embeddings
 
     def forward(self, input: dict[str, Tensor], **kwargs) -> dict[str, Tensor]:
-        if self.module_kwargs is None:
+        if self.module_kwargs is None and not (hasattr(module, "forward_kwargs") for module in self.modules()):
             return super().forward(input)
 
         for module_name, module in self.named_children():
-            module_kwarg_keys = self.module_kwargs.get(module_name, [])
-            module_kwargs = {key: value for key, value in kwargs.items() if key in module_kwarg_keys}
+            if self.module_kwargs is not None:
+                module_kwarg_keys = self.module_kwargs.get(module_name, [])
+            else:
+                module_kwarg_keys = []
+            module_kwargs = {
+                key: value
+                for key, value in kwargs.items()
+                if key in module_kwarg_keys or hasattr(module, "forward_kwargs") and key in module.forward_kwargs
+            }
             input = module(input, **module_kwargs)
         return input
 
@@ -1302,6 +1319,14 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
             safe_serialization=safe_serialization,
         )
 
+    def _update_default_model_id(self, model_card):
+        if self.model_card_data.model_id:
+            model_card = model_card.replace(
+                'model = SentenceTransformer("sentence_transformers_model_id"',
+                f'model = SentenceTransformer("{self.model_card_data.model_id}"',
+            )
+        return model_card
+
     def _create_model_card(
         self, path: str, model_name: str | None = None, train_datasets: list[str] | None = "deprecated"
     ) -> None:
@@ -1326,12 +1351,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         # we don't generate a new model card, but reuse the old one instead.
         if self._model_card_text and "generated_from_trainer" not in self.model_card_data.tags:
             model_card = self._model_card_text
-            if self.model_card_data.model_id:
-                # If the original model card was saved without a model_id, we replace the model_id with the new model_id
-                model_card = model_card.replace(
-                    'model = SentenceTransformer("sentence_transformers_model_id"',
-                    f'model = SentenceTransformer("{self.model_card_data.model_id}"',
-                )
+            model_card = self._update_default_model_id(model_card)
         else:
             try:
                 model_card = generate_model_card(self)
@@ -1459,9 +1479,9 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         if commit_message is None:
             backend = self.get_backend()
             if backend == "torch":
-                commit_message = "Add new SentenceTransformer model"
+                commit_message = f"Add new {self.__class__.__name__} model"
             else:
-                commit_message = f"Add new SentenceTransformer model with an {backend} backend"
+                commit_message = f"Add new {self.__class__.__name__} model with an {backend} backend"
 
         commit_description = ""
         if create_pr:
@@ -1478,11 +1498,11 @@ Hello!
 ## Tip:
 Consider testing this pull request before merging by loading the model from this PR with the `revision` argument:
 ```python
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import {self.__class__.__name__}
 
 # TODO: Fill in the PR number
 pr_number = 2
-model = SentenceTransformer(
+model = {self.__class__.__name__}(
     "{repo_id}",
     revision=f"refs/pr/{{pr_number}}",
     backend="{self.get_backend()}",
@@ -1693,7 +1713,7 @@ print(similarities)
                 > version.parse(__version__)
             ):
                 logger.warning(
-                    f'You are trying to use a model that was created with Sentence Transformers version {self._model_config["__version__"]["sentence_transformers"]}, '
+                    f"You are trying to use a model that was created with Sentence Transformers version {self._model_config['__version__']['sentence_transformers']}, "
                     f"but you're currently using version {__version__}. This might cause unexpected behavior or errors. "
                     "In that case, try to update to the latest version."
                 )
@@ -1705,6 +1725,8 @@ print(similarities)
                 self.prompts = self._model_config.get("prompts", {})
             if not self.default_prompt_name:
                 self.default_prompt_name = self._model_config.get("default_prompt_name", None)
+            if "model_type" not in self._model_config.keys():
+                self._model_config["model_type"] = self.__class__.__name__
 
         # Check if a readme exists
         model_card_path = load_file_path(
@@ -1846,9 +1868,9 @@ print(similarities)
         Get torch.device from module, assuming that the whole module has one device.
         In case there are no PyTorch parameters, fall back to CPU.
         """
-        if isinstance(self[0], Transformer):
-            return self[0].auto_model.device
-
+        for child in self.modules():
+            if isinstance(child, PreTrainedModel) and hasattr(child, "device"):
+                return child.device
         try:
             return next(self.parameters()).device
         except StopIteration:
@@ -1939,6 +1961,47 @@ print(similarities)
 
     def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None) -> None:
         # Propagate the gradient checkpointing to the transformer model
-        for module in self:
-            if isinstance(module, Transformer):
-                return module.auto_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+        for child in self.modules():
+            if isinstance(child, PreTrainedModel):
+                return child.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+
+    def _get_model_type(
+        self,
+        model_name_or_path: str,
+        token: bool | str | None,
+        cache_folder: str | None,
+        revision: str | None = None,
+        local_files_only: bool = False,
+    ) -> str | None:
+        """
+        Retrieves the model_type from the config_sentence_transformers.json file.
+
+        This is used to determine the appropriate loading method:
+        - SentenceTransformer: These models should be loaded with _load_sbert_model when used with SentenceTransformer class
+        - SparseEncoder: These models should be loaded with _load_auto_model when used with SentenceTransformer class
+
+        When a model type doesn't match the class being used to load it, we switch loading methods
+        to ensure compatibility.
+
+        Args:
+            model_name_or_path (str): The name or path of the pre-trained model.
+            token (Optional[Union[bool, str]]): The token to use for the model.
+            cache_folder (Optional[str]): The folder to cache the model.
+            revision (Optional[str], optional): The revision of the model. Defaults to None.
+            local_files_only (bool, optional): Whether to use only local files. Defaults to False.
+
+        Returns:
+            Optional[str]: The model type (SentenceTransformer or SparseEncoder) if available, None otherwise.
+        """
+        config_sentence_transformers_json_path = load_file_path(
+            model_name_or_path,
+            "config_sentence_transformers.json",
+            token=token,
+            cache_folder=cache_folder,
+            revision=revision,
+            local_files_only=local_files_only,
+        )
+
+        with open(config_sentence_transformers_json_path) as fIn:
+            config = json.load(fIn)
+            return config.get("model_type", "SentenceTransformer")  # Default to "SentenceTransformer" if not specified

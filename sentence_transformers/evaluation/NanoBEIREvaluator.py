@@ -186,6 +186,8 @@ class NanoBEIREvaluator(SentenceEvaluator):
             # => 0.8084508771660436
     """
 
+    information_retrieval_class = InformationRetrievalEvaluator
+
     def __init__(
         self,
         dataset_names: list[DatasetNameType] | None = None,
@@ -246,7 +248,6 @@ class NanoBEIREvaluator(SentenceEvaluator):
             "score_functions": score_functions,
             "main_score_function": main_score_function,
         }
-
         self.evaluators = [
             self._load_dataset(name, **ir_evaluator_kwargs)
             for name in tqdm(self.dataset_names, desc="Loading NanoBEIR datasets", leave=False)
@@ -354,11 +355,14 @@ class NanoBEIREvaluator(SentenceEvaluator):
                 self.primary_metric = f"{score_function}_ndcg@{max(self.ndcg_at_k)}"
             else:
                 self.primary_metric = f"{self.main_score_function.value}_ndcg@{max(self.ndcg_at_k)}"
-
-        avg_queries = np.mean([len(evaluator.queries) for evaluator in self.evaluators])
-        avg_corpus = np.mean([len(evaluator.corpus) for evaluator in self.evaluators])
-        logger.info(f"Average Queries: {avg_queries}")
-        logger.info(f"Average Corpus: {avg_corpus}\n")
+        avg_queries_info = {
+            k: np.mean([e.queries_info[k] for e in self.evaluators]) for k in self.evaluators[0].queries_info
+        }
+        avg_corpus_info = {
+            k: np.mean([e.corpus_info[k] for e in self.evaluators]) for k in self.evaluators[0].corpus_info
+        }
+        logger.info("Average Querie: " + ", ".join(f"{k}: {v}" for k, v in avg_queries_info.items()))
+        logger.info("Average Corpus: " + ", ".join(f"{k}: {v}" for k, v in avg_corpus_info.items()))
 
         for name in self.score_function_names:
             logger.info(f"Aggregated for Score Function: {name}")
@@ -412,7 +416,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
         if self.corpus_prompts is not None:
             ir_evaluator_kwargs["corpus_prompt"] = self.corpus_prompts.get(dataset_name, None)
         human_readable_name = self._get_human_readable_name(dataset_name)
-        return InformationRetrievalEvaluator(
+        return self.information_retrieval_class(
             queries=queries_dict,
             corpus=corpus_dict,
             relevant_docs=qrels_dict,

@@ -150,9 +150,11 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                 self.queries_ids.append(qid)
 
         self.queries = [queries[qid] for qid in self.queries_ids]
+        self.queries_info = {"num_rows": len(self.queries)}
 
         self.corpus_ids = list(corpus.keys())
         self.corpus = [corpus[cid] for cid in self.corpus_ids]
+        self.corpus_info = {"num_rows": len(self.corpus)}
 
         self.query_prompt = query_prompt
         self.query_prompt_name = query_prompt_name
@@ -293,13 +295,11 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
 
         # Compute embedding for the queries
         with nullcontext() if self.truncate_dim is None else model.truncate_sentence_embeddings(self.truncate_dim):
-            query_embeddings = model.encode(
+            query_embeddings = self.embed_inputs(
+                model,
                 self.queries,
                 prompt_name=self.query_prompt_name,
                 prompt=self.query_prompt,
-                batch_size=self.batch_size,
-                show_progress_bar=self.show_progress_bar,
-                convert_to_tensor=True,
             )
 
         queries_result_list = {}
@@ -319,13 +319,11 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                     if self.truncate_dim is None
                     else corpus_model.truncate_sentence_embeddings(self.truncate_dim)
                 ):
-                    sub_corpus_embeddings = corpus_model.encode(
+                    sub_corpus_embeddings = self.embed_inputs(
+                        corpus_model,
                         self.corpus[corpus_start_idx:corpus_end_idx],
                         prompt_name=self.corpus_prompt_name,
                         prompt=self.corpus_prompt,
-                        batch_size=self.batch_size,
-                        show_progress_bar=self.show_progress_bar,
-                        convert_to_tensor=True,
                     )
             else:
                 sub_corpus_embeddings = corpus_embeddings[corpus_start_idx:corpus_end_idx]
@@ -363,8 +361,8 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
                     score, corpus_id = queries_result_list[name][query_itr][doc_itr]
                     queries_result_list[name][query_itr][doc_itr] = {"corpus_id": corpus_id, "score": score}
 
-        logger.info(f"Queries: {len(self.queries)}")
-        logger.info(f"Corpus: {len(self.corpus)}\n")
+        logger.info("Query info: " + ", ".join(f"{k}: {v}" for k, v in self.queries_info.items()))
+        logger.info("Corpus info: " + ", ".join(f"{k}: {v}" for k, v in self.corpus_info.items()))
 
         # Compute scores
         scores = {name: self.compute_metrics(queries_result_list[name]) for name in self.score_functions}
@@ -375,6 +373,24 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             self.output_scores(scores[name])
 
         return scores
+
+    def embed_inputs(
+        self,
+        model: SentenceTransformer,
+        sentences: str | list[str] | np.ndarray,
+        prompt_name: str | None = None,
+        prompt: str | None = None,
+        **kwargs,
+    ) -> np.ndarray:
+        return model.encode(
+            sentences,
+            prompt_name=prompt_name,
+            prompt=prompt,
+            batch_size=self.batch_size,
+            show_progress_bar=self.show_progress_bar,
+            convert_to_tensor=True,
+            **kwargs,
+        )
 
     def compute_metrics(self, queries_result_list: list[object]):
         # Init score computation values
