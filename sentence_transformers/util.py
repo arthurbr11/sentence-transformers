@@ -10,6 +10,7 @@ import random
 import sys
 from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError, metadata
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 
 import numpy as np
@@ -288,7 +289,6 @@ def pairwise_angle_sim(x: Tensor, y: Tensor) -> Tensor:
     Returns:
         Tensor: Vector with res[i] = angle_sim(a[i], b[i])
     """
-    # TODO Check  if it's actually possible to handle sparse tensors in an efficient way
     if x.is_sparse:
         logger.warning("Pairwise angle similarity does not support sparse tensors. Converting to dense.")
         x = x.coalesce().to_dense()
@@ -1555,7 +1555,8 @@ def is_sentence_transformer_model(
 
 def load_file_path(
     model_name_or_path: str,
-    filename: str,
+    filename: str | Path,
+    subfolder: str = "",
     token: bool | str | None = None,
     cache_folder: str | None = None,
     revision: str | None = None,
@@ -1567,6 +1568,7 @@ def load_file_path(
     Args:
         model_name_or_path (str): The model name or path.
         filename (str): The name of the file to load.
+        subfolder (str): The subfolder within the model subfolder (if applicable).
         token (Optional[Union[bool, str]]): The token to access the remote file (if applicable).
         cache_folder (Optional[str]): The folder to cache the downloaded file (if applicable).
         revision (Optional[str], optional): The revision of the file (if applicable). Defaults to None.
@@ -1576,15 +1578,17 @@ def load_file_path(
         Optional[str]: The path to the loaded file, or None if the file could not be found or loaded.
     """
     # If file is local
-    file_path = os.path.join(model_name_or_path, filename)
-    if os.path.exists(file_path):
-        return file_path
+    file_path = Path(model_name_or_path, subfolder, filename)
+    if file_path.exists():
+        return str(file_path)
 
     # If file is remote
+    file_path = Path(subfolder, filename)
     try:
         return hf_hub_download(
             model_name_or_path,
-            filename=filename,
+            filename=file_path.name,
+            subfolder=file_path.parent.as_posix(),
             revision=revision,
             library_name="sentence-transformers",
             token=token,
@@ -1597,35 +1601,38 @@ def load_file_path(
 
 def load_dir_path(
     model_name_or_path: str,
-    directory: str,
+    subfolder: str,
     token: bool | str | None = None,
     cache_folder: str | None = None,
     revision: str | None = None,
     local_files_only: bool = False,
 ) -> str | None:
     """
-    Loads the directory path for a given model name or path.
+    Loads the subfolder path for a given model name or path.
 
     Args:
         model_name_or_path (str): The name or path of the model.
-        directory (str): The directory to load.
+        subfolder (str): The subfolder to load.
         token (Optional[Union[bool, str]]): The token for authentication.
         cache_folder (Optional[str]): The folder to cache the downloaded files.
         revision (Optional[str], optional): The revision of the model. Defaults to None.
         local_files_only (bool, optional): Whether to only use local files. Defaults to False.
 
     Returns:
-        Optional[str]: The directory path if it exists, otherwise None.
+        Optional[str]: The subfolder path if it exists, otherwise None.
     """
+    if isinstance(subfolder, Path):
+        subfolder = subfolder.as_posix()
+
     # If file is local
-    dir_path = os.path.join(model_name_or_path, directory)
-    if os.path.exists(dir_path):
-        return dir_path
+    dir_path = Path(model_name_or_path, subfolder)
+    if dir_path.exists():
+        return str(dir_path)
 
     download_kwargs = {
         "repo_id": model_name_or_path,
         "revision": revision,
-        "allow_patterns": f"{directory}/**" if directory not in ["", "."] else None,
+        "allow_patterns": f"{subfolder}/**" if subfolder not in ["", "."] else None,
         "library_name": "sentence-transformers",
         "token": token,
         "cache_dir": cache_folder,
@@ -1639,7 +1646,7 @@ def load_dir_path(
         # Otherwise, try local (i.e. cache) only
         download_kwargs["local_files_only"] = True
         repo_path = snapshot_download(**download_kwargs)
-    return os.path.join(repo_path, directory)
+    return Path(repo_path, subfolder)
 
 
 def save_to_hub_args_decorator(func):
@@ -1739,3 +1746,43 @@ def disable_datasets_caching():
     finally:
         if is_originally_enabled:
             enable_caching()
+
+
+def get_top_k_token_weight(
+    row: torch.Tensor, tokenizer, top_k: int
+) -> list[tuple[str, float]] | list[list[tuple[str, float]]]:
+    """
+    Given a tensor (1D or 2D; sparse or dense), return the top k (token, value) pairs.
+
+    For a 1D tensor, returns a list of (token, value) tuples.
+    For a 2D tensor, returns a list (one per row) of lists of (token, value) tuples.
+
+    Args:
+        row (torch.Tensor): 1D or 2D tensor (sparse or dense)
+        tokenizer: Tokenizer with a method convert_ids_to_tokens.
+        top_k (int): Number of top elements to return per row.
+
+    Returns:
+        Union[List[Tuple[str, float]], List[List[Tuple[str, float]]]]:
+            List for 1D tensor or list of lists for 2D tensor.
+    """
+    if row.dim() == 2:
+        return [get_top_k_token_weight(row[i], tokenizer, top_k) for i in range(row.size(0))]
+    elif row.dim() == 1:
+        if row.is_sparse or getattr(row, "is_sparse_csr", False):
+            row = row.coalesce() if row.is_sparse else row
+            values = row.values()
+            indices = row.indices().squeeze()
+            if values.numel() == 0:
+                return []
+            topk = min(top_k, indices.numel())
+            top_values, top_idx = torch.topk(values, topk)
+            # Convert indices to tokens
+            top_tokens = tokenizer.convert_ids_to_tokens(indices[top_idx].tolist())
+            return list(zip(top_tokens, top_values.tolist()))
+        else:
+            top_values, top_indices = torch.topk(row, top_k)
+            top_tokens = tokenizer.convert_ids_to_tokens(top_indices.tolist())
+            return list(zip(top_tokens, top_values.tolist()))
+    else:
+        raise ValueError("Input tensor must be 1D or 2D.")

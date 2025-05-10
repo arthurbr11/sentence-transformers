@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from typing import Any, Callable, Literal
 
 import numpy as np
@@ -11,12 +12,12 @@ from torch import Tensor, nn
 from tqdm import trange
 from transformers import AutoConfig
 
-from sentence_transformers import SentenceTransformer
-from sentence_transformers.models import Pooling, Transformer
+from sentence_transformers.models import Asym, Pooling, Transformer
+from sentence_transformers.SentenceTransformer import SentenceTransformer
 from sentence_transformers.similarity_functions import SimilarityFunction
 from sentence_transformers.sparse_encoder.model_card import SparseEncoderModelCardData
-from sentence_transformers.sparse_encoder.models import CSRSparsity, MLMTransformer, SpladePooling
-from sentence_transformers.util import batch_to_device, truncate_embeddings_for_sparse
+from sentence_transformers.sparse_encoder.models import IDF, CSRSparsity, MLMTransformer, SpladePooling
+from sentence_transformers.util import batch_to_device, get_top_k_token_weight, truncate_embeddings_for_sparse
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,110 @@ class SparseEncoder(SentenceTransformer):
 
     # -----------------------------------Added------------------------------------
     # - get_sparsity_stats
+    # - decode_top_k_tokens
+    """
+    Loads or creates a SparseEncoder model that can be used to map sentences / text to sparse embeddings.
+
+    Args:
+        model_name_or_path (str, optional): If it is a filepath on disc, it loads the model from that path. If it is not a path,
+            it first tries to download a pre-trained SparseEncoder model. If that fails, tries to construct a model
+            from the Hugging Face Hub with that name.
+        modules (Iterable[nn.Module], optional): A list of torch Modules that should be called sequentially, can be used to create custom
+            SparseEncoder models from scratch.
+        device (str, optional): Device (like "cuda", "cpu", "mps", "npu") that should be used for computation. If None, checks if a GPU
+            can be used.
+        prompts (Dict[str, str], optional): A dictionary with prompts for the model. The key is the prompt name, the value is the prompt text.
+            The prompt text will be prepended before any text to encode. For example:
+            `{"query": "query: ", "passage": "passage: "}` or `{"clustering": "Identify the main category based on the
+            titles in "}`.
+        default_prompt_name (str, optional): The name of the prompt that should be used by default. If not set,
+            no prompt will be applied.
+        similarity_fn_name (str or SimilarityFunction, optional): The name of the similarity function to use. Valid options are "cosine", "dot",
+            "euclidean", and "manhattan". If not set, it is automatically set to "cosine" if `similarity` or
+            `similarity_pairwise` are called while `model.similarity_fn_name` is still `None`.
+        cache_folder (str, optional): Path to store models. Can also be set by the SENTENCE_TRANSFORMERS_HOME environment variable.
+        trust_remote_code (bool, optional): Whether or not to allow for custom models defined on the Hub in their own modeling files.
+            This option should only be set to True for repositories you trust and in which you have read the code, as it
+            will execute code present on the Hub on your local machine.
+        revision (str, optional): The specific model version to use. It can be a branch name, a tag name, or a commit id,
+            for a stored model on Hugging Face.
+        local_files_only (bool, optional): Whether or not to only look at local files (i.e., do not try to download the model).
+        token (bool or str, optional): Hugging Face authentication token to download private models.
+        use_auth_token (bool or str, optional): Deprecated argument. Please use `token` instead.
+        truncate_dim (int, optional): The dimension to truncate sentence embeddings to. `None` does no truncation. Truncation is
+            only applicable during inference when :meth:`SparseEncoder.encode` is called.
+        model_kwargs (Dict[str, Any], optional): Additional model configuration parameters to be passed to the Hugging Face Transformers model.
+            Particularly useful options are:
+
+            - ``torch_dtype``: Override the default `torch.dtype` and load the model under a specific `dtype`.
+              The different options are:
+
+                    1. ``torch.float16``, ``torch.bfloat16`` or ``torch.float``: load in a specified
+                    ``dtype``, ignoring the model's ``config.torch_dtype`` if one exists. If not specified - the model will
+                    get loaded in ``torch.float`` (fp32).
+
+                    2. ``"auto"`` - A ``torch_dtype`` entry in the ``config.json`` file of the model will be
+                    attempted to be used. If this entry isn't found then next check the ``dtype`` of the first weight in
+                    the checkpoint that's of a floating point type and use that as ``dtype``. This will load the model
+                    using the ``dtype`` it was saved in at the end of the training. It can't be used as an indicator of how
+                    the model was trained. Since it could be trained in one of half precision dtypes, but saved in fp32.
+            - ``attn_implementation``: The attention implementation to use in the model (if relevant). Can be any of
+              `"eager"` (manual implementation of the attention), `"sdpa"` (using `F.scaled_dot_product_attention
+              <https://pytorch.org/docs/master/generated/torch.nn.functional.scaled_dot_product_attention.html>`_),
+              or `"flash_attention_2"` (using `Dao-AILab/flash-attention <https://github.com/Dao-AILab/flash-attention>`_).
+              By default, if available, SDPA will be used for torch>=2.1.1. The default is otherwise the manual `"eager"`
+              implementation.
+            - ``provider``: If backend is "onnx", this is the provider to use for inference, for example "CPUExecutionProvider",
+              "CUDAExecutionProvider", etc. See https://onnxruntime.ai/docs/execution-providers/ for all ONNX execution providers.
+            - ``file_name``: If backend is "onnx" or "openvino", this is the file name to load, useful for loading optimized
+              or quantized ONNX or OpenVINO models.
+            - ``export``: If backend is "onnx" or "openvino", then this is a boolean flag specifying whether this model should
+              be exported to the backend. If not specified, the model will be exported only if the model repository or directory
+              does not already contain an exported model.
+
+            See the `PreTrainedModel.from_pretrained
+            <https://huggingface.co/docs/transformers/en/main_classes/model#transformers.PreTrainedModel.from_pretrained>`_
+            documentation for more details.
+        tokenizer_kwargs (Dict[str, Any], optional): Additional tokenizer configuration parameters to be passed to the Hugging Face Transformers tokenizer.
+            See the `AutoTokenizer.from_pretrained
+            <https://huggingface.co/docs/transformers/en/model_doc/auto#transformers.AutoTokenizer.from_pretrained>`_
+            documentation for more details.
+        config_kwargs (Dict[str, Any], optional): Additional model configuration parameters to be passed to the Hugging Face Transformers config.
+            See the `AutoConfig.from_pretrained
+            <https://huggingface.co/docs/transformers/en/model_doc/auto#transformers.AutoConfig.from_pretrained>`_
+            documentation for more details.
+        model_card_data (:class:`~sentence_transformers.sparse_encoder.model_card.SparseEncoderModelCardData`, optional): A model
+            card data object that contains information about the model. This is used to generate a model card when saving
+            the model. If not set, a default model card data object is created.
+        backend (str): The backend to use for inference. Can be one of "torch" (default), "onnx", or "openvino".
+            See https://sbert.net/docs/sentence_transformer/usage/efficiency.html for benchmarking information
+            on the different backends.
+
+    Example:
+        ::
+
+            from sentence_transformers import SparseEncoder
+
+            # Load a pre-trained SparseEncoder model
+            model = SparseEncoder('naver/splade-cocondenser-ensembledistil')
+
+            # Encode some texts
+            sentences = [
+                "The weather is lovely today.",
+                "It's so sunny outside!",
+                "He drove to the stadium.",
+            ]
+            embeddings = model.encode(sentences)
+            print(embeddings.shape)
+            # (3, 30522)
+
+            # Get the similarity scores between all sentences
+            similarities = model.similarity(embeddings, embeddings)
+            print(similarities)
+            # tensor([[35.629, 9.1541, 0.11269],
+            #         [9.1541, 27.478, 0.019061],
+            #         [0.11269, 0.019061, 29.612]])
+    """
 
     def __init__(
         self,
@@ -130,10 +235,59 @@ class SparseEncoder(SentenceTransformer):
         output_value: Literal["sentence_embedding", "token_embeddings"] | None = "sentence_embedding",
         convert_to_tensor: bool = True,
         convert_to_sparse_tensor: bool = True,
-        save_on_cpu: bool = False,
+        save_to_cpu: bool = False,
         device: str | None = None,
         **kwargs: Any,
     ) -> list[Tensor] | np.ndarray | Tensor | dict[str, Tensor] | list[dict[str, Tensor]]:
+        """
+        Computes sparse sentence embeddings.
+
+        Args:
+            sentences (Union[str, List[str]]): The sentences to embed.
+            prompt_name (Optional[str], optional): The name of the prompt to use for encoding. Must be a key in the `prompts` dictionary,
+                which is either set in the constructor or loaded from the model configuration. For example if
+                ``prompt_name`` is "query" and the ``prompts`` is {"query": "query: ", ...}, then the sentence "What
+                is the capital of France?" will be encoded as "query: What is the capital of France?" because the sentence
+                is appended to the prompt. If ``prompt`` is also set, this argument is ignored. Defaults to None.
+            prompt (Optional[str], optional): The prompt to use for encoding. For example, if the prompt is "query: ", then the
+                sentence "What is the capital of France?" will be encoded as "query: What is the capital of France?"
+                because the sentence is appended to the prompt. If ``prompt`` is set, ``prompt_name`` is ignored. Defaults to None.
+            batch_size (int, optional): The batch size used for the computation. Defaults to 32.
+            show_progress_bar (bool, optional): Whether to output a progress bar when encode sentences. Defaults to None.
+            output_value (Optional[Literal["sentence_embedding", "token_embeddings"]], optional): The type of embeddings to return:
+                "sentence_embedding" to get sentence embeddings, "token_embeddings" to get wordpiece token embeddings, and `None`,
+                to get all output values. Defaults to "sentence_embedding".
+            convert_to_tensor (bool, optional): Whether the output should be one large tensor. Overwrites `convert_to_numpy`.
+                Defaults to False.
+            convert_to_sparse_tensor (bool, optional): Whether the output should be in the format of a sparse tensor.
+                Defaults to True.
+            save_to_cpu (bool, optional):  Whether the output should be moved to cpu or stay on the device it has been computed on.
+                Defaults to False
+            device (str, optional): Which :class:`torch.device` to use for the computation, if None current device will be use. Defaults to None.
+
+        Returns:
+            Union[List[Tensor], ndarray, Tensor]: By default, a 2d numpy array with shape [num_inputs, output_dimension] is returned.
+            If only one string input is provided, then the output is a 1d array with shape [output_dimension]. If ``convert_to_tensor``,
+            a torch Tensor is returned instead. If ``self.truncate_dim <= output_dimension`` then output_dimension is ``self.truncate_dim``.
+
+        Example:
+            ::
+
+                from sentence_transformers import SparseEncoder
+
+                # Load a pre-trained SparseEncoder model
+                model = SparseEncoder('naver/splade-cocondenser-ensembledistil')
+
+                # Encode some texts
+                sentences = [
+                    "The weather is lovely today.",
+                    "It's so sunny outside!",
+                    "He drove to the stadium.",
+                ]
+                embeddings = model.encode(sentences)
+                print(embeddings.shape)
+                # (3, 30522)
+        """
         self.eval()
         if show_progress_bar is None:
             show_progress_bar = logger.getEffectiveLevel() in (
@@ -215,7 +369,7 @@ class SparseEncoder(SentenceTransformer):
                     embeddings = embeddings.detach()
                     if convert_to_sparse_tensor:
                         embeddings = embeddings.to_sparse()
-                    if save_on_cpu:
+                    if save_to_cpu:
                         embeddings = embeddings.cpu()
 
                 all_embeddings.extend(embeddings)
@@ -374,7 +528,9 @@ class SparseEncoder(SentenceTransformer):
         Returns:
             List[nn.Module]: A list containing the transformer model and the pooling model.
         """
-        logger.warning(f"No sparse-encoder model found with name {model_name_or_path}. Creating a new one.")
+        logger.warning(
+            f"No sparse-encoder model found with name {model_name_or_path}. Creating a new one with defaults settings compatible to the base model."
+        )
 
         shared_kwargs = {
             "token": token,
@@ -483,6 +639,17 @@ class SparseEncoder(SentenceTransformer):
 
     @property
     def similarity_fn_name(self) -> Literal["cosine", "dot", "euclidean", "manhattan"]:
+        """Return the name of the similarity function used by :meth:`SparseEncoder.similarity` and :meth:`SparseEncoder.similarity_pairwise`.
+
+        Returns:
+            Optional[str]: The name of the similarity function. Can be None if not set, in which case it will
+                default to "cosine" when first called.
+
+        Example:
+            >>> model = SparseEncoder("naver/splade-cocondenser-ensembledistil")
+            >>> model.similarity_fn_name
+            'dot'
+        """
         if self._similarity_fn_name is None:
             self.similarity_fn_name = SimilarityFunction.DOT
         return self._similarity_fn_name
@@ -491,9 +658,84 @@ class SparseEncoder(SentenceTransformer):
     def similarity_pairwise(
         self,
     ) -> Callable[[Tensor | npt.NDArray[np.float32], Tensor | npt.NDArray[np.float32]], Tensor]:
+        """
+        Compute the similarity between two collections of embeddings. The output will be a vector with the similarity
+        scores between each pair of embeddings.
+        This method supports only embeddings with fp32 precision and does not accommodate quantized embeddings.
+
+        Args:
+            embeddings1 (Union[Tensor, ndarray]): [num_embeddings, embedding_dim] or [embedding_dim]-shaped numpy array or torch tensor.
+            embeddings2 (Union[Tensor, ndarray]): [num_embeddings, embedding_dim] or [embedding_dim]-shaped numpy array or torch tensor.
+
+        Returns:
+            Tensor: A [num_embeddings]-shaped torch tensor with pairwise similarity scores.
+
+        Example:
+            ::
+
+                >>> model = SparseEncoder("naver/splade-cocondenser-ensembledistil")
+                >>> sentences = [
+                ...     "The weather is so nice!",
+                ...     "It's so sunny outside.",
+                ...     "He's driving to the movie theater.",
+                ...     "She's going to the cinema.",
+                ... ]
+                >>> embeddings = model.encode(sentences, convert_to_sparse_tensor=False)
+                >>> model.similarity_pairwise(embeddings[::2], embeddings[1::2])
+                tensor([12.9143, 15.3007], device='cuda:0')
+                >>> model.similarity_fn_name
+                "dot"
+                >>> model.similarity_fn_name = "cosine"
+                >>> model.similarity_pairwise(embeddings[::2], embeddings[1::2])
+                tensor([0.4424, 0.4055], device='cuda:0')
+        """
         if self.similarity_fn_name is None:
             self.similarity_fn_name = SimilarityFunction.DOT
         return self._similarity_pairwise
+
+    @property
+    def similarity(self) -> Callable[[Tensor | npt.NDArray[np.float32], Tensor | npt.NDArray[np.float32]], Tensor]:
+        """
+        Compute the similarity between two collections of embeddings. The output will be a matrix with the similarity
+        scores between all embeddings from the first parameter and all embeddings from the second parameter. This
+        differs from `similarity_pairwise` which computes the similarity between each pair of embeddings.
+        This method supports only embeddings with fp32 precision and does not accommodate quantized embeddings.
+
+        Args:
+            embeddings1 (Union[Tensor, ndarray]): [num_embeddings_1, embedding_dim] or [embedding_dim]-shaped numpy array or torch tensor.
+            embeddings2 (Union[Tensor, ndarray]): [num_embeddings_2, embedding_dim] or [embedding_dim]-shaped numpy array or torch tensor.
+
+        Returns:
+            Tensor: A [num_embeddings_1, num_embeddings_2]-shaped torch tensor with similarity scores.
+
+        Example:
+            ::
+
+                >>> model = SparseEncoder("naver/splade-cocondenser-ensembledistil")
+                >>> sentences = [
+                ...     "The weather is so nice!",
+                ...     "It's so sunny outside.",
+                ...     "He's driving to the movie theater.",
+                ...     "She's going to the cinema.",
+                ... ]
+                >>> embeddings = model.encode(sentences, normalize_embeddings=True)
+                >>> model.similarity(embeddings, embeddings)
+                tensor([[   30.9529,    12.9143,     0.0000,     0.0106],
+                        [   12.9143,    27.5256,     0.5829,     0.5958],
+                        [    0.0000,     0.5829,    36.0683,    15.3007],
+                        [    0.0106,     0.5958,    15.3007,    39.4664]], device='cuda:0')
+                >>> model.similarity_fn_name
+                "dot"
+                >>> model.similarity_fn_name = "cosine"
+                >>> model.similarity(embeddings, embeddings)
+                tensor([[    1.0000,     0.4424,     0.0000,     0.0003],
+                        [    0.4424,     1.0000,     0.0185,     0.0181],
+                        [    0.0000,     0.0185,     1.0000,     0.4055],
+                        [    0.0003,     0.0181,     0.4055,     1.0000]], device='cuda:0')
+        """
+        if self.similarity_fn_name is None:
+            self.similarity_fn_name = SimilarityFunction.DOT
+        return self._similarity
 
     @similarity_fn_name.setter
     def similarity_fn_name(
@@ -564,3 +806,162 @@ class SparseEncoder(SentenceTransformer):
             "row_sparsity_mean": torch.mean(sparsity_per_row).item(),
         }
         return results
+
+    def get_sentence_embedding_dimension(self) -> int | None:
+        """
+        Returns the number of dimensions in the output of :meth:`SparseEncoder.encode <sentence_transformers.sparse_encoder.SparseEncoder.encode>`.
+        We override the function without updating regarding the truncate dim as for sparse model the dimension of the output
+        is the same, only the active dimensions number changes.
+
+        Returns:
+            Optional[int]: The number of dimensions in the output of `encode`. If it's not known, it's `None`.
+        """
+        return super().get_sentence_embedding_dimension()
+
+    @property
+    def max_seq_length(self) -> int:
+        """
+        Returns the maximal input sequence length for the model. Longer inputs will be truncated.
+
+        Returns:
+            int: The maximal input sequence length.
+
+        Example:
+            ::
+
+                from sentence_transformers import SparseEncoder
+
+                model = SparseEncoder("naver/splade-cocondenser-ensembledistil")
+                print(model.max_seq_length)
+                # => 512
+        """
+        return super().max_seq_length
+
+    @max_seq_length.setter
+    def max_seq_length(self, value) -> None:
+        """
+        Property to set the maximal input sequence length for the model. Longer inputs will be truncated.
+        """
+        self._first_module().max_seq_length = value
+
+    @contextmanager
+    def truncate_sentence_embeddings(self, truncate_dim: int | None) -> Iterator[None]:
+        """
+        In this context, :meth:`SparseEncoder.encode <sentence_transformers.sparse_encoder.SparseEncoder.encode>` outputs
+        sentence embeddings with at most ``truncate_dim`` number of active dimensions.
+
+        This may be useful when you are using a model but want to have a treshold for the number of active dimensions
+        in the output to control the size of the embeddings you want to index.
+
+        Args:
+            truncate_dim (int, optional): The dimension to truncate sentence embeddings to. ``None`` does no truncation.
+
+        Example:
+            ::
+
+                from sentence_transformers import SparseEncoder
+
+                model = SparseEncoder("naver/splade-cocondenser-ensembledistil")
+
+                with model.truncate_sentence_embeddings(truncate_dim=16):
+                    embeddings_truncated = model.encode(["hello there", "hiya"])
+
+                for i in range(embeddings_truncated.shape[0]):
+                    num_nonzero = embeddings_truncated[i].coalesce().indices().shape[1]
+                    assert num_nonzero <= 16, f"Embedding {i} has {num_nonzero} non-zero elements"
+        """
+        original_output_dim = self.truncate_dim
+        try:
+            self.truncate_dim = truncate_dim
+            yield
+        finally:
+            self.truncate_dim = original_output_dim
+
+    def decode(
+        self,
+        embeddings_1: torch.Tensor,
+        embeddings_2: torch.Tensor = None,
+        top_k: int = 10,
+    ) -> dict:
+        """
+        Decode top K tokens and weights from one or two sparse embeddings, and optionally compute pointwise scores.
+
+        Args:
+            embeddings_1 (torch.Tensor): First embedding tensor (batch_1, vocab) or (vocab,) if we have a second embedding.
+            embeddings_2 (torch.Tensor, optional): Second embedding tensor (batch_2, vocab) or (vocab,)
+            top_k (int): Number of top tokens to return per embedding.
+        returns:
+            dict: Dictionary with decoded tokens and weights. If embeddings_2 is provided, also includes pointwise scores.
+
+        """
+        if not embeddings_1.is_sparse:
+            embeddings_1 = embeddings_1.to_sparse()
+        if embeddings_2 is not None and not embeddings_2.is_sparse:
+            embeddings_2 = embeddings_2.to_sparse()
+
+        # Check for sparse interpretable output
+        interpretable_output = False
+        for module in self._modules.values():
+            if isinstance(module, SpladePooling) or isinstance(module, IDF):
+                interpretable_output = True
+                break
+            if isinstance(module, Asym):
+                for submodule in module._modules.values():
+                    if isinstance(submodule, SpladePooling) or isinstance(submodule, IDF):
+                        interpretable_output = True
+                        break
+        if not interpretable_output:
+            raise RuntimeError("decode is only available for models with a SpladePooling or IDF module.")
+
+        tokenizer = self.tokenizer
+
+        # Handle embeddings_1
+        result = {"decoded_1": get_top_k_token_weight(embeddings_1, tokenizer, top_k=top_k)}
+
+        if embeddings_2 is not None:
+            result["decoded_2"] = get_top_k_token_weight(embeddings_2, tokenizer, top_k=top_k)
+
+            if embeddings_1.ndim != 1:
+                if embeddings_1.shape[0] == 1:
+                    embeddings_1 = embeddings_1[0]
+                else:
+                    raise ValueError(
+                        f"Expected 1D tensor or 2D with first dim 1 for embeddings_1, but got {embeddings_1.shape} dimensions."
+                    )
+
+            if embeddings_2.ndim == 1:
+                embeddings_2 = torch.sparse_coo_tensor(
+                    torch.cat(
+                        [
+                            torch.zeros(
+                                1,
+                                embeddings_2.coalesce().indices().size(1),
+                                dtype=embeddings_2.coalesce().indices().dtype,
+                                device=embeddings_2.device,
+                            ),
+                            embeddings_2.coalesce().indices(),
+                        ],
+                        dim=0,
+                    ),
+                    embeddings_2.coalesce().values(),
+                    size=(1, embeddings_2.size(0)),
+                )
+            elif embeddings_2.ndim != 2:
+                raise ValueError(
+                    f"Expected 2D tensor with first dim 1 for embeddings_2, but got {embeddings_2.shape} dimensions."
+                )
+            if embeddings_1.shape[0] != embeddings_2.shape[1]:
+                raise ValueError(
+                    f"Expected embeddings_1 and embeddings_2 to have the same number of columns, but got {embeddings_1.shape[1]} and {embeddings_2.shape[1]}."
+                )
+            if embeddings_2.shape[0] == 1:
+                result["pointwise_scores"] = get_top_k_token_weight(
+                    embeddings_1 * embeddings_2[0], tokenizer, top_k=top_k
+                )
+
+            else:
+                result["pointwise_scores"] = [
+                    get_top_k_token_weight(embeddings_1 * embeddings_2[i], tokenizer, top_k=top_k)
+                    for i in range(embeddings_2.shape[0])
+                ]
+        return result
