@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+import torch
 from torch import Tensor, nn
 
 from sentence_transformers import SentenceTransformer, util
 
 
+# TODO; Change docstring to handle multiple negatives
 class MarginMSELoss(nn.Module):
     def __init__(self, model: SentenceTransformer, similarity_fct=util.pairwise_dot_score) -> None:
         """
@@ -100,7 +102,49 @@ class MarginMSELoss(nn.Module):
                     }
 
                 train_dataset = train_dataset.map(compute_labels, batched=True)
-                # In this example, the labels become -0.036 and 0.68, respectively
+                loss = losses.MarginMSELoss(student_model)
+
+                trainer = SentenceTransformerTrainer(
+                    model=student_model,
+                    train_dataset=train_dataset,
+                    loss=loss,
+                )
+                trainer.train()
+
+            For multiple negatives:
+
+            ::
+
+                from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer, losses
+                from datasets import Dataset
+
+                student_model = SentenceTransformer("microsoft/mpnet-base")
+                teacher_model = SentenceTransformer("all-mpnet-base-v2")
+                train_dataset = Dataset.from_dict({
+                "query": ["It's nice weather outside today.", "He drove to work."],
+                "passage1": ["It's so sunny.", "He took the car to work."],
+                "passage2": ["It's very cold.", "She walked to the store."],
+                "passage3": ["Its rainy", "She took the bus"],
+                })
+
+                def compute_labels(batch):
+                    emb_queries = teacher_model.encode(batch["query"])
+                    emb_passages1 = teacher_model.encode(batch["passage1"])
+                    emb_passages2 = teacher_model.encode(batch["passage2"])
+                    emb_passages3 = teacher_model.encode(batch["passage3"])
+                    return {
+                        "label": torch.stack(
+                            [
+                                teacher_model.similarity_pairwise(emb_queries, emb_passages1)
+                                - teacher_model.similarity_pairwise(emb_queries, emb_passages2),
+                                teacher_model.similarity_pairwise(emb_queries, emb_passages1)
+                                - teacher_model.similarity_pairwise(emb_queries, emb_passages3),
+                            ],
+                            dim=1,
+                        )
+                    }
+
+                train_dataset = train_dataset.map(compute_labels, batched=True)
                 loss = losses.MarginMSELoss(student_model)
 
                 trainer = SentenceTransformerTrainer(
@@ -116,17 +160,30 @@ class MarginMSELoss(nn.Module):
         self.loss_fct = nn.MSELoss()
 
     def forward(self, sentence_features: Iterable[dict[str, Tensor]], labels: Tensor) -> Tensor:
-        # sentence_features: query, positive passage, negative passage
-        reps = [self.model(sentence_feature)["sentence_embedding"] for sentence_feature in sentence_features]
-        embeddings_query = reps[0]
-        embeddings_pos = reps[1]
-        embeddings_neg = reps[2]
+        embeddings = [self.model(sentence_feature)["sentence_embedding"] for sentence_feature in sentence_features]
 
+        return self.compute_loss_from_embeddings(embeddings, labels)
+
+    def compute_loss_from_embeddings(self, embeddings: list[Tensor], labels: Tensor) -> Tensor:
+        # sentence_features: query, positive passage, negative passage(s)
+        embeddings_query = embeddings[0]
+        embeddings_pos = embeddings[1]
+        embeddings_negs = embeddings[2:]
+
+        # Compute similarity scores for positive passage
         scores_pos = self.similarity_fct(embeddings_query, embeddings_pos)
-        scores_neg = self.similarity_fct(embeddings_query, embeddings_neg)
-        margin_pred = scores_pos - scores_neg
 
-        return self.loss_fct(margin_pred, labels)
+        # Handle both single and multiple negative cases
+        if len(embeddings_negs) == 1:
+            scores_neg = self.similarity_fct(embeddings_query, embeddings_negs[0])
+            margin_pred = scores_pos - scores_neg
+            return self.loss_fct(margin_pred, labels)
+        else:
+            # Multiple negatives case
+            scores_negs = [self.similarity_fct(embeddings_query, neg) for neg in embeddings_negs]
+            margins = [scores_pos - neg_score for neg_score in scores_negs]
+            margins = torch.stack(margins, dim=1)  # Shape: (batch_size, num_negatives)
+            return self.loss_fct(margins, labels)
 
     @property
     def citation(self) -> str:
