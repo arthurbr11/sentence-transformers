@@ -14,15 +14,10 @@ from transformers.integrations import WandbCallback
 from sentence_transformers.evaluation import SentenceEvaluator, SequentialEvaluator
 from sentence_transformers.sparse_encoder.callbacks.splade_callbacks import SpladeLambdaSchedulerCallback
 from sentence_transformers.sparse_encoder.data_collator import SparseEncoderDataCollator
-from sentence_transformers.sparse_encoder.losses import (
-    SparseMultipleNegativesRankingLoss,
-)
-from sentence_transformers.sparse_encoder.losses.SpladeLoss import SpladeLoss
+from sentence_transformers.sparse_encoder.losses import SparseMultipleNegativesRankingLoss, SpladeLoss
 from sentence_transformers.sparse_encoder.model_card import SparseEncoderModelCardCallback
 from sentence_transformers.sparse_encoder.SparseEncoder import SparseEncoder
-from sentence_transformers.sparse_encoder.training_args import (
-    SparseEncoderTrainingArguments,
-)
+from sentence_transformers.sparse_encoder.training_args import SparseEncoderTrainingArguments
 from sentence_transformers.trainer import SentenceTransformerTrainer
 from sentence_transformers.util import is_datasets_available, is_training_available
 
@@ -33,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 
 class SparseEncoderTrainer(SentenceTransformerTrainer):
-    # TODO: Check if there is no other things we need to overwrite and if the ones we did are correct + the docstring associated in the class
     """
     SparseEncoderTrainer is a simple but feature-complete training and eval loop for PyTorch
     based on the SentenceTransformerTrainer that based on 🤗 Transformers :class:`~transformers.Trainer`.
@@ -275,24 +269,25 @@ class SparseEncoderTrainer(SentenceTransformerTrainer):
             self.loss = self.prepare_loss(loss, model)
 
         is_splade_loss = isinstance(loss, SpladeLoss) if loss is not None else False
-        has_splade_scheduler = (
-            any(isinstance(callback, SpladeLambdaSchedulerCallback) for callback in callbacks)
-            if callbacks is not None
-            else False
-        )
+        splade_scheduler_callback_index = None
+        for idx, callback in enumerate(self.callback_handler.callbacks):
+            if isinstance(callback, SpladeLambdaSchedulerCallback):
+                splade_scheduler_callback_index = idx
+                break
 
-        # If we're using SpladeLoss but don't have a scheduler callback, add one
-        if is_splade_loss and not has_splade_scheduler:
-            if callbacks is None:
-                callbacks = []
+        # If we're using SpladeLoss but don't have a scheduler callback, add one or if it's not the second one in the list
+        if is_splade_loss and (splade_scheduler_callback_index is None or splade_scheduler_callback_index > 1):
+            if splade_scheduler_callback_index is not None:
+                splade_callback = self.callback_handler.callbacks.pop(splade_scheduler_callback_index)
 
-            logger.warning(
-                "SpladeLoss detected without SpladeLambdaSchedulerCallback. "
-                "Adding default SpladeLambdaSchedulerCallback to gradually increase lambda values from 0 to their maximum."
-            )
+            else:
+                logger.warning(
+                    "SpladeLoss detected without SpladeLambdaSchedulerCallback. "
+                    "Adding default SpladeLambdaSchedulerCallback to gradually increase lambda values from 0 to their maximum."
+                )
 
-            # Create and insert the callback after the default callback informing the trainer when to log, evaluate, save, etc.
-            splade_callback = SpladeLambdaSchedulerCallback(loss=loss)
+                # Create and insert the callback after the default callback informing the trainer when to log, evaluate, save, etc.
+                splade_callback = SpladeLambdaSchedulerCallback(loss=loss)
             self.callback_handler.callbacks.insert(1, splade_callback)
 
         # If evaluator is a list, we wrap it in a SequentialEvaluator

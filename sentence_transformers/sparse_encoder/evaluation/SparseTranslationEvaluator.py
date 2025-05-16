@@ -16,6 +16,64 @@ logger = logging.getLogger(__name__)
 
 
 class SparseTranslationEvaluator(TranslationEvaluator):
+    """
+    This evaluator extends :class:`~sentence_transformers.evaluation.TranslationEvaluator` but is specifically designed for sparse encoder models.
+
+    Given two sets of sentences in different languages, e.g. (en_1, en_2, en_3...) and (fr_1, fr_2, fr_3, ...),
+    and assuming that fr_i is the translation of en_i.
+    Checks if vec(en_i) has the highest similarity to vec(fr_i). Computes the accuracy in both directions
+
+    The labels need to indicate the similarity between the sentences.
+
+    Args:
+        source_sentences (List[str]): List of sentences in the source language.
+        target_sentences (List[str]): List of sentences in the target language.
+        show_progress_bar (bool): Whether to show a progress bar when computing embeddings. Defaults to False.
+        batch_size (int): The batch size to compute sentence embeddings. Defaults to 16.
+        name (str): The name of the evaluator. Defaults to an empty string.
+        print_wrong_matches (bool): Whether to print incorrect matches. Defaults to False.
+        write_csv (bool): Whether to write the evaluation results to a CSV file. Defaults to True.
+        max_active_dims (Optional[int], optional): The maximum number of active dimensions to use.
+            `None` uses the model's current `max_active_dims`. Defaults to None.
+
+    Example:
+        ::
+
+            import logging
+
+            from datasets import load_dataset
+
+            from sentence_transformers import SparseEncoder
+            from sentence_transformers.sparse_encoder.evaluation import SparseTranslationEvaluator
+
+            logging.basicConfig(format="%(message)s", level=logging.INFO)
+
+            # Load a model, not mutilingual but hope to see some on the hub soon
+            model = SparseEncoder("naver/splade-cocondenser-ensembledistil")
+
+            # Load a parallel sentences dataset
+            dataset = load_dataset("sentence-transformers/parallel-sentences-news-commentary", "en-nl", split="train[:1000]")
+
+            # Initialize the TranslationEvaluator using the same texts from two languages
+            translation_evaluator = SparseTranslationEvaluator(
+                source_sentences=dataset["english"],
+                target_sentences=dataset["non_english"],
+                name="news-commentary-en-nl",
+            )
+            results = translation_evaluator(model)
+            '''
+            Evaluating translation matching Accuracy of the model on the news-commentary-en-nl dataset:
+            Accuracy src2trg: 41.40
+            Accuracy trg2src: 47.70
+            '''
+            # Print the results
+            print(f"Primary metric: {translation_evaluator.primary_metric}")
+            # => Primary metric: news-commentary-en-nl_mean_accuracy
+            print(f"Primary metric value: {results[translation_evaluator.primary_metric]:.4f}")
+            # => Primary metric value: 0.4455
+
+    """
+
     def __init__(
         self,
         source_sentences: list[str],
@@ -25,8 +83,9 @@ class SparseTranslationEvaluator(TranslationEvaluator):
         name: str = "",
         print_wrong_matches: bool = False,
         write_csv: bool = True,
-        truncate_dim: int | None = None,
+        max_active_dims: int | None = None,
     ):
+        self.max_active_dims = max_active_dims
         return super().__init__(
             source_sentences,
             target_sentences,
@@ -35,7 +94,6 @@ class SparseTranslationEvaluator(TranslationEvaluator):
             name=name,
             print_wrong_matches=print_wrong_matches,
             write_csv=write_csv,
-            truncate_dim=truncate_dim,
         )
 
     def __call__(
@@ -49,14 +107,14 @@ class SparseTranslationEvaluator(TranslationEvaluator):
         sentences: str | list[str] | np.ndarray,
         **kwargs,
     ) -> list[Tensor]:
-        kwargs["truncate_dim"] = self.truncate_dim
         return model.encode(
             sentences,
             batch_size=self.batch_size,
             show_progress_bar=self.show_progress_bar,
             convert_to_tensor=False,
             convert_to_sparse_tensor=True,
-            save_on_cpu=True,
+            save_to_cpu=True,
+            max_active_dims=self.max_active_dims,
             **kwargs,
         )
 
