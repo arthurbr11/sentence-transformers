@@ -32,8 +32,9 @@ class LossComponentLoggingCallback(TrainerCallback):
         Called when the Trainer logs metrics. Adds accumulated custom loss
         components to the logs and resets the accumulators.
         """
+        prefix = "eval_" if control.should_evaluate else ""
         averaged_loss_components_over_steps = {
-            f"custom_{k_sum}": s_sum / self.trainer_ref.loss_components_count
+            f"{prefix}custom_{k_sum}": s_sum / self.trainer_ref.loss_components_count
             for k_sum, s_sum in self.trainer_ref.loss_components_sum.items()
         }
         if averaged_loss_components_over_steps:
