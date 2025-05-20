@@ -138,7 +138,15 @@ class SpladeLambdaSchedulerCallback(TrainerCallback):
             self._current_lambda_query = new_lambda_query
             self._current_lambda_corpus = new_lambda_corpus
 
-    def on_log(self, args, state, control, model=None, logs=None, **kwargs):
+    def on_log(
+        self,
+        args: SparseEncoderTrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        model=None,
+        logs=None,
+        **kwargs,
+    ):
         """Log the current lambda values."""
         logs["lambda_corpus"] = self._current_lambda_corpus
         if self._current_lambda_query is not None:

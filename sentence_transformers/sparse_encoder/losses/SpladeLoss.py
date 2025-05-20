@@ -113,11 +113,15 @@ class SpladeLoss(nn.Module):
         embeddings = [self.model(sentence_feature)["sentence_embedding"] for sentence_feature in sentence_features]
 
         loss_value = self.loss.compute_loss_from_embeddings(embeddings, labels)
+
+        loss_components = {"main_loss": loss_value}
         if self.all_docs:
             # If all_docs is True, we consider all the input to be of the same type and so under the same regularization
             corpus_loss = self.regularizer.compute_loss_from_embeddings(torch.cat(embeddings))
         else:
             corpus_loss = self.regularizer.compute_loss_from_embeddings(torch.cat(embeddings[1:]))
+
+        loss_components["corpus_loss"] = self.lambda_corpus * corpus_loss
 
         # Compute total loss
         total_loss = loss_value + self.lambda_corpus * corpus_loss
@@ -126,8 +130,11 @@ class SpladeLoss(nn.Module):
         if self.lambda_query is not None:
             query_loss = self.regularizer.compute_loss_from_embeddings(embeddings[0])
             total_loss = total_loss + self.lambda_query * query_loss
+            loss_components["query_loss"] = self.lambda_query * query_loss
 
-        return total_loss
+        loss_components["loss"] = total_loss
+
+        return loss_components
 
     def get_config_dict(self):
         """

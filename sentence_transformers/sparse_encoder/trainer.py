@@ -12,6 +12,7 @@ from transformers import __version__ as transformers_version
 from transformers.integrations import WandbCallback
 
 from sentence_transformers.evaluation import SentenceEvaluator, SequentialEvaluator
+from sentence_transformers.sparse_encoder.callbacks.loss_callbacks import LossComponentLoggingCallback
 from sentence_transformers.sparse_encoder.callbacks.splade_callbacks import SpladeLambdaSchedulerCallback
 from sentence_transformers.sparse_encoder.data_collator import SparseEncoderDataCollator
 from sentence_transformers.sparse_encoder.losses import SparseMultipleNegativesRankingLoss, SpladeLoss
@@ -290,6 +291,17 @@ class SparseEncoderTrainer(SentenceTransformerTrainer):
             )
         self.add_model_card_callback(default_args_dict)
 
+        self.log_loss_component = args.log_loss_component
+        if self.log_loss_component:
+            self.lo
+            # Initialize accumulators for loss custom components
+            self.loss_components_sum = {}
+            self.loss_components_count = 0
+
+            # Add Loss Component Logging Callback
+            loss_component_callback = LossComponentLoggingCallback(self)
+            self.callback_handler.callbacks.insert(1, loss_component_callback)
+
     def add_model_card_callback(self, default_args_dict: dict[str, Any]) -> None:
         """
         Add a callback responsible for automatically tracking data required for the automatic model card generation
@@ -378,9 +390,68 @@ class SparseEncoderTrainer(SentenceTransformerTrainer):
         Returns:
             Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, Any]]]: The computed loss. If `return_outputs` is True, returns a tuple of loss and outputs. Otherwise, returns only the loss.
         """
-        return super().compute_loss(
-            model=model, inputs=inputs, return_outputs=return_outputs, num_items_in_batch=num_items_in_batch
-        )
+        dataset_name = inputs.pop("dataset_name", None)
+        features, labels = self.collect_features(inputs)
+        loss_fn = self.loss
+
+        if isinstance(loss_fn, dict) and dataset_name:
+            loss_fn = loss_fn[dataset_name]
+
+        # Insert the wrapped (e.g. distributed or compiled) model into the loss function,
+        # if the loss stores the model. Only called once per process
+        if (
+            model == self.model_wrapped
+            and hasattr(loss_fn, "model")  # Only if the loss stores the model
+            and loss_fn.model != model  # Only if the wrapped model is not already stored
+        ):
+            loss_fn = self.override_model_in_loss(loss_fn, model)
+        loss_output = loss_fn(features, labels)
+
+        current_step_loss_components = {}
+        if isinstance(loss_output, dict):
+            loss = loss_output["loss"]
+            if self.log_loss_component:
+                for k, v_raw in loss_output.items():
+                    if k == "loss":
+                        continue
+                    current_step_loss_components[f"{k}"] = v_raw.detach().item()
+        elif isinstance(loss_output, torch.Tensor):
+            loss = loss_output
+            # No additional components to extract
+        else:
+            raise TypeError(
+                f"Loss function {type(loss_fn).__name__} returned an unexpected type: {type(loss_output)}. "
+                "Expected a Tensor or a dict with a 'loss' key."
+            )
+
+        # Accumulate loss components
+        if self.log_loss_component:
+            for k, v_val in current_step_loss_components.items():
+                # v_val is already a Python float here
+                avg_v_for_step_across_gpus: float
+                if self.accelerator.num_processes > 1:
+                    # Create a tensor on the current device for gathering
+                    tensor_v = torch.tensor(v_val, device=self.accelerator.device, dtype=torch.float32).unsqueeze(0)
+                    gathered_v_tensor = self.accelerator.gather_for_metrics(tensor_v)
+                    avg_v_for_step_across_gpus = gathered_v_tensor.mean().item()
+                else:
+                    avg_v_for_step_across_gpus = v_val
+
+                if self.state.is_world_process_zero:
+                    self.loss_components_sum[k] = self.loss_components_sum.get(k, 0.0) + avg_v_for_step_across_gpus
+
+            if (
+                self.state.is_world_process_zero
+            ):  # Increment count only once per step on the main process after all components are processed
+                self.loss_components_count += 1
+
+        if return_outputs:
+            # During prediction/evaluation, `compute_loss` will be called with `return_outputs=True`.
+            # However, Sentence Transformer losses do not return outputs, so we return an empty dictionary.
+            # This does not result in any problems, as the SentenceTransformerTrainingArguments sets
+            # `prediction_loss_only=True` which means that the output is not used.
+            return loss, {}
+        return loss
 
     def _load_from_checkpoint(self, checkpoint_path: str) -> None:
         from sentence_transformers import SparseEncoder

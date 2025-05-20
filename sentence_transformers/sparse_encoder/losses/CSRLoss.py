@@ -194,7 +194,9 @@ class CSRLoss(nn.Module):
         # Compute total loss: L_CSR = L_recon + γ * L_MRL
         total_loss = recon_loss + self.gamma * ranking_loss
 
-        return total_loss
+        loss_components = {"reconstruction_loss": recon_loss, "main_loss": ranking_loss, "loss": total_loss}
+
+        return loss_components
 
     def get_config_dict(self):
         """

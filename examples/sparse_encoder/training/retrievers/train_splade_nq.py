@@ -88,13 +88,14 @@ def main():
         metric_for_best_model="eval_NanoBEIR_mean_dot_ndcg@10",
         # Optional tracking/debugging parameters:
         eval_strategy="steps",
-        eval_steps=1650,
+        eval_steps=100,
         save_strategy="steps",
-        save_steps=1650,
+        save_steps=100,
         save_total_limit=2,
-        logging_steps=200,
+        logging_steps=10,
         run_name=run_name,  # Will be used in W&B if `wandb` is installed
         seed=42,
+        log_loss_component=True,  # Log the different components of the loss
     )
 
     # 6. Create the trainer & start training

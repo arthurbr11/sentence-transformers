@@ -34,4 +34,9 @@ class SparseEncoderTrainingArguments(SentenceTransformerTrainingArguments):
         multi_dataset_batch_sampler (Union[:class:`~sentence_transformers.training_args.MultiDatasetBatchSamplers`, `str`], *optional*):
             The multi-dataset batch sampler to use. See :class:`~sentence_transformers.training_args.MultiDatasetBatchSamplers`
             for valid options. Defaults to ``MultiDatasetBatchSamplers.PROPORTIONAL``.
+        log_loss_component (`bool`, *optional*):
+            Wether to log the different commponents separately that compose the loss function. It can be great to monitor
+            the influence of each component on the final loss.
     """
+
+    log_loss_component: bool = False
