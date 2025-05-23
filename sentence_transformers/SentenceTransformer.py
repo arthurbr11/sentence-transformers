@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import importlib
+import inspect
 import json
 import logging
 import math
@@ -28,16 +29,18 @@ from huggingface_hub import HfApi
 from packaging import version
 from torch import Tensor, device, nn
 from tqdm.autonotebook import trange
-from transformers import is_torch_npu_available
+from transformers import PreTrainedModel, is_torch_npu_available
 from transformers.dynamic_module_utils import get_class_from_dynamic_module, get_relative_import_files
+from typing_extensions import deprecated
 
 from sentence_transformers.model_card import SentenceTransformerModelCardData, generate_model_card
+from sentence_transformers.models.Module import Module
 from sentence_transformers.similarity_functions import SimilarityFunction
 
 from . import __MODEL_HUB_ORGANIZATION__, __version__
 from .evaluation import SentenceEvaluator
 from .fit_mixin import FitMixin
-from .models import Normalize, Pooling, Transformer
+from .models import Pooling, Transformer
 from .peft_mixin import PeftAdapterMixin
 from .quantization import quantize_embeddings
 from .util import (
@@ -84,8 +87,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         local_files_only (bool, optional): Whether or not to only look at local files (i.e., do not try to download the model).
         token (bool or str, optional): Hugging Face authentication token to download private models.
         use_auth_token (bool or str, optional): Deprecated argument. Please use `token` instead.
-        truncate_dim (int, optional): The dimension to truncate sentence embeddings to. `None` does no truncation. Truncation is
-            only applicable during inference when :meth:`SentenceTransformer.encode` is called.
+        truncate_dim (int, optional): The dimension to truncate sentence embeddings to. Defaults to None.
         model_kwargs (Dict[str, Any], optional): Additional model configuration parameters to be passed to the Hugging Face Transformers model.
             Particularly useful options are:
 
@@ -159,6 +161,8 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
             #         [0.0492, 0.0421, 1.0000]])
     """
 
+    model_card_data_class = SentenceTransformerModelCardData
+
     def __init__(
         self,
         model_name_or_path: str | None = None,
@@ -186,11 +190,11 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         self.similarity_fn_name = similarity_fn_name
         self.trust_remote_code = trust_remote_code
         self.truncate_dim = truncate_dim
-        self.model_card_data = model_card_data or SentenceTransformerModelCardData()
+        self.model_card_data = model_card_data or self.model_card_data_class()
         self.module_kwargs = None
         self._model_card_vars = {}
         self._model_card_text = None
-        self._model_config = {}
+        self._model_config = {"model_type": self.__class__.__name__}
         self.backend = backend
         if use_auth_token is not None:
             warnings.warn(
@@ -216,7 +220,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
             adapt_transformers_to_gaudi()
 
         if model_name_or_path is not None and model_name_or_path != "":
-            logger.info(f"Load pretrained SentenceTransformer: {model_name_or_path}")
+            logger.info(f"Load pretrained {self.__class__.__name__}: {model_name_or_path}")
 
             # Old models that don't belong to any organization
             basic_transformer_models = [
@@ -298,13 +302,23 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
                 if "/" not in model_name_or_path and model_name_or_path.lower() not in basic_transformer_models:
                     # A model from sentence-transformers
                     model_name_or_path = __MODEL_HUB_ORGANIZATION__ + "/" + model_name_or_path
-
-            if is_sentence_transformer_model(
+            has_modules = is_sentence_transformer_model(
                 model_name_or_path,
                 token,
                 cache_folder=cache_folder,
                 revision=revision,
                 local_files_only=local_files_only,
+            )
+            if (
+                has_modules
+                and self._get_model_type(
+                    model_name_or_path,
+                    token,
+                    cache_folder=cache_folder,
+                    revision=revision,
+                    local_files_only=local_files_only,
+                )
+                == self._model_config["model_type"]
             ):
                 modules, self.module_kwargs = self._load_sbert_model(
                     model_name_or_path,
@@ -328,6 +342,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
                     model_kwargs=model_kwargs,
                     tokenizer_kwargs=tokenizer_kwargs,
                     config_kwargs=config_kwargs,
+                    has_modules=has_modules,
                 )
 
         if modules is not None and not isinstance(modules, OrderedDict):
@@ -406,6 +421,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         convert_to_tensor: bool = ...,
         device: str | None = ...,
         normalize_embeddings: bool = ...,
+        truncate_dim: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
 
@@ -425,6 +441,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         convert_to_tensor: Literal[False] = ...,
         device: str | None = ...,
         normalize_embeddings: bool = ...,
+        truncate_dim: int | None = ...,
         **kwargs,
     ) -> np.ndarray: ...
 
@@ -444,6 +461,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         convert_to_tensor: Literal[True] = ...,
         device: str | None = ...,
         normalize_embeddings: bool = ...,
+        truncate_dim: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
 
@@ -462,6 +480,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         convert_to_tensor: bool = ...,
         device: str | None = ...,
         normalize_embeddings: bool = ...,
+        truncate_dim: int | None = ...,
         **kwargs,
     ) -> list[Tensor]: ...
 
@@ -480,6 +499,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         convert_to_tensor: bool = ...,
         device: str | None = ...,
         normalize_embeddings: bool = ...,
+        truncate_dim: int | None = ...,
         **kwargs,
     ) -> list[dict[str, Tensor]]: ...
 
@@ -498,6 +518,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         convert_to_tensor: bool = ...,
         device: str | None = ...,
         normalize_embeddings: bool = ...,
+        truncate_dim: int | None = ...,
         **kwargs,
     ) -> dict[str, Tensor]: ...
 
@@ -516,6 +537,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         convert_to_tensor: bool = ...,
         device: str | None = ...,
         normalize_embeddings: bool = ...,
+        truncate_dim: int | None = ...,
         **kwargs,
     ) -> Tensor: ...
 
@@ -532,6 +554,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         convert_to_tensor: bool = False,
         device: str | None = None,
         normalize_embeddings: bool = False,
+        truncate_dim: int | None = None,
         **kwargs,
     ) -> list[Tensor] | np.ndarray | Tensor | dict[str, Tensor] | list[dict[str, Tensor]]:
         """
@@ -563,6 +586,12 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
             device (str, optional): Which :class:`torch.device` to use for the computation. Defaults to None.
             normalize_embeddings (bool, optional): Whether to normalize returned vectors to have length 1. In that case,
                 the faster dot-product (util.dot_score) instead of cosine similarity can be used. Defaults to False.
+            truncate_dim (int, optional): The dimension to truncate sentence embeddings to.
+                Truncation is especially interesting for `Matryoshka models <https://sbert.net/examples/sentence_transformer/training/matryoshka/README.html>`_,
+                i.e. models that are trained to still produce useful embeddings even if the embedding dimension is reduced.
+                Truncated embeddings require less memory and are faster to perform retrieval with, but note that inference
+                is just as fast, and the embedding performance is worse than the full embeddings. If None, the ``truncate_dim``
+                from the model initialization is used. Defaults to None.
 
         Returns:
             Union[List[Tensor], ndarray, Tensor]: By default, a 2d numpy array with shape [num_inputs, output_dimension] is returned.
@@ -644,6 +673,8 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
 
         self.to(device)
 
+        truncate_dim = truncate_dim if truncate_dim is not None else self.truncate_dim
+
         all_embeddings = []
         length_sorted_idx = np.argsort([-self._text_length(sen) for sen in sentences])
         sentences_sorted = [sentences[idx] for idx in length_sorted_idx]
@@ -686,9 +717,10 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
                 if self.device.type == "hpu":
                     out_features = copy.deepcopy(out_features)
 
-                out_features["sentence_embedding"] = truncate_embeddings(
-                    out_features["sentence_embedding"], self.truncate_dim
-                )
+                if truncate_dim:
+                    out_features["sentence_embedding"] = truncate_embeddings(
+                        out_features["sentence_embedding"], truncate_dim
+                    )
 
                 if output_value == "token_embeddings":
                     embeddings = []
@@ -749,12 +781,19 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         return all_embeddings
 
     def forward(self, input: dict[str, Tensor], **kwargs) -> dict[str, Tensor]:
-        if self.module_kwargs is None:
+        if self.module_kwargs is None and not (hasattr(module, "forward_kwargs") for module in self.modules()):
             return super().forward(input)
 
         for module_name, module in self.named_children():
-            module_kwarg_keys = self.module_kwargs.get(module_name, [])
-            module_kwargs = {key: value for key, value in kwargs.items() if key in module_kwarg_keys}
+            if self.module_kwargs is not None:
+                module_kwarg_keys = self.module_kwargs.get(module_name, [])
+            else:
+                module_kwarg_keys = []
+            module_kwargs = {
+                key: value
+                for key, value in kwargs.items()
+                if key in module_kwarg_keys or hasattr(module, "forward_kwargs") and key in module.forward_kwargs
+            }
             input = module(input, **module_kwargs)
         return input
 
@@ -965,6 +1004,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         show_progress_bar: bool | None = None,
         precision: Literal["float32", "int8", "uint8", "binary", "ubinary"] = "float32",
         normalize_embeddings: bool = False,
+        truncate_dim: int | None = None,
     ) -> np.ndarray:
         """
         Encodes a list of sentences using multiple processes and GPUs via
@@ -995,6 +1035,12 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
                 semantic search, among other tasks. Defaults to "float32".
             normalize_embeddings (bool): Whether to normalize returned vectors to have length 1. In that case,
                 the faster dot-product (util.dot_score) instead of cosine similarity can be used. Defaults to False.
+            truncate_dim (int, optional): The dimension to truncate sentence embeddings to.
+                Truncation is especially interesting for `Matryoshka models <https://sbert.net/examples/sentence_transformer/training/matryoshka/README.html>`_,
+                i.e. models that are trained to still produce useful embeddings even if the embedding dimension is reduced.
+                Truncated embeddings require less memory and are faster to perform retrieval with, but note that inference
+                is just as fast, and the embedding performance is worse than the full embeddings. If None, the ``truncate_dim``
+                from the model initialization is used. Defaults to None.
 
         Returns:
             np.ndarray: A 2D numpy array with shape [num_inputs, output_dimension].
@@ -1035,13 +1081,24 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
             chunk.append(sentence)
             if len(chunk) >= chunk_size:
                 input_queue.put(
-                    [last_chunk_id, batch_size, chunk, prompt_name, prompt, precision, normalize_embeddings]
+                    [
+                        last_chunk_id,
+                        batch_size,
+                        chunk,
+                        prompt_name,
+                        prompt,
+                        precision,
+                        normalize_embeddings,
+                        truncate_dim,
+                    ]
                 )
                 last_chunk_id += 1
                 chunk = []
 
         if len(chunk) > 0:
-            input_queue.put([last_chunk_id, batch_size, chunk, prompt_name, prompt, precision, normalize_embeddings])
+            input_queue.put(
+                [last_chunk_id, batch_size, chunk, prompt_name, prompt, precision, normalize_embeddings, truncate_dim]
+            )
             last_chunk_id += 1
 
         output_queue = pool["output"]
@@ -1061,7 +1118,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         """
         while True:
             try:
-                chunk_id, batch_size, sentences, prompt_name, prompt, precision, normalize_embeddings = (
+                chunk_id, batch_size, sentences, prompt_name, prompt, precision, normalize_embeddings, truncate_dim = (
                     input_queue.get()
                 )
                 embeddings = model.encode(
@@ -1074,6 +1131,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
                     convert_to_numpy=True,
                     batch_size=batch_size,
                     normalize_embeddings=normalize_embeddings,
+                    truncate_dim=truncate_dim,
                 )
 
                 results_queue.put([chunk_id, embeddings])
@@ -1227,8 +1285,10 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
 
         # Save modules
         for idx, name in enumerate(self._modules):
-            module = self._modules[name]
-            if idx == 0 and hasattr(module, "save_in_root"):  # Save first module in the main folder
+            module: Module = self._modules[name]
+            if (
+                idx == 0 and hasattr(module, "save_in_root") and module.save_in_root
+            ):  # Save first module in the main folder
                 model_path = path + "/"
             else:
                 model_path = os.path.join(path, str(idx) + "_" + type(module).__name__)
@@ -1302,6 +1362,14 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
             safe_serialization=safe_serialization,
         )
 
+    def _update_default_model_id(self, model_card):
+        if self.model_card_data.model_id:
+            model_card = model_card.replace(
+                'model = SentenceTransformer("sentence_transformers_model_id"',
+                f'model = SentenceTransformer("{self.model_card_data.model_id}"',
+            )
+        return model_card
+
     def _create_model_card(
         self, path: str, model_name: str | None = None, train_datasets: list[str] | None = "deprecated"
     ) -> None:
@@ -1326,12 +1394,7 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         # we don't generate a new model card, but reuse the old one instead.
         if self._model_card_text and "generated_from_trainer" not in self.model_card_data.tags:
             model_card = self._model_card_text
-            if self.model_card_data.model_id:
-                # If the original model card was saved without a model_id, we replace the model_id with the new model_id
-                model_card = model_card.replace(
-                    'model = SentenceTransformer("sentence_transformers_model_id"',
-                    f'model = SentenceTransformer("{self.model_card_data.model_id}"',
-                )
+            model_card = self._update_default_model_id(model_card)
         else:
             try:
                 model_card = generate_model_card(self)
@@ -1459,9 +1522,9 @@ class SentenceTransformer(nn.Sequential, FitMixin, PeftAdapterMixin):
         if commit_message is None:
             backend = self.get_backend()
             if backend == "torch":
-                commit_message = "Add new SentenceTransformer model"
+                commit_message = f"Add new {self.__class__.__name__} model"
             else:
-                commit_message = f"Add new SentenceTransformer model with an {backend} backend"
+                commit_message = f"Add new {self.__class__.__name__} model with an {backend} backend"
 
         commit_description = ""
         if create_pr:
@@ -1478,11 +1541,11 @@ Hello!
 ## Tip:
 Consider testing this pull request before merging by loading the model from this PR with the `revision` argument:
 ```python
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import {self.__class__.__name__}
 
 # TODO: Fill in the PR number
 pr_number = 2
-model = SentenceTransformer(
+model = {self.__class__.__name__}(
     "{repo_id}",
     revision=f"refs/pr/{{pr_number}}",
     backend="{self.get_backend()}",
@@ -1571,6 +1634,7 @@ print(similarities)
         model_kwargs: dict[str, Any] | None = None,
         tokenizer_kwargs: dict[str, Any] | None = None,
         config_kwargs: dict[str, Any] | None = None,
+        has_modules: bool = False,
     ) -> list[nn.Module]:
         """
         Creates a simple Transformer + Mean Pooling model and returns the modules
@@ -1585,6 +1649,7 @@ print(similarities)
             model_kwargs (Optional[Dict[str, Any]], optional): Additional keyword arguments for the model. Defaults to None.
             tokenizer_kwargs (Optional[Dict[str, Any]], optional): Additional keyword arguments for the tokenizer. Defaults to None.
             config_kwargs (Optional[Dict[str, Any]], optional): Additional keyword arguments for the config. Defaults to None.
+            has_modules (bool, optional): Whether the model has modules.json. Defaults to False.
 
         Returns:
             List[nn.Module]: A list containing the transformer model and the pooling model.
@@ -1693,7 +1758,7 @@ print(similarities)
                 > version.parse(__version__)
             ):
                 logger.warning(
-                    f'You are trying to use a model that was created with Sentence Transformers version {self._model_config["__version__"]["sentence_transformers"]}, '
+                    f"You are trying to use a model that was created with Sentence Transformers version {self._model_config['__version__']['sentence_transformers']}, "
                     f"but you're currently using version {__version__}. This might cause unexpected behavior or errors. "
                     "In that case, try to update to the latest version."
                 )
@@ -1705,6 +1770,8 @@ print(similarities)
                 self.prompts = self._model_config.get("prompts", {})
             if not self.default_prompt_name:
                 self.default_prompt_name = self._model_config.get("default_prompt_name", None)
+            if "model_type" not in self._model_config.keys():
+                self._model_config["model_type"] = self.__class__.__name__
 
         # Check if a readme exists
         model_card_path = load_file_path(
@@ -1738,90 +1805,75 @@ print(similarities)
         module_kwargs = OrderedDict()
         for module_config in modules_config:
             class_ref = module_config["type"]
-            module_class = self._load_module_class_from_ref(
+            module_class: Module = self._load_module_class_from_ref(
                 class_ref, model_name_or_path, trust_remote_code, revision, model_kwargs
             )
 
-            # For Transformer, don't load the full directory, rely on `transformers` instead
-            # But, do load the config file first.
-            if module_config["path"] == "":
-                kwargs = {}
-                for config_name in [
-                    "sentence_bert_config.json",
-                    "sentence_roberta_config.json",
-                    "sentence_distilbert_config.json",
-                    "sentence_camembert_config.json",
-                    "sentence_albert_config.json",
-                    "sentence_xlm-roberta_config.json",
-                    "sentence_xlnet_config.json",
-                ]:
-                    config_path = load_file_path(
+            # Backwards compatibility: if the module is older and its `load` method only supports one parameter,
+            # a path to a local directory containing the module files, then we load it with the old style
+            load_signature = inspect.signature(module_class.load)
+            # Check if the `load` method only accepts a single parameter (the path to the local directory).
+            # This indicates an older module that does not support the newer loading method with multiple arguments.
+            if len(load_signature.parameters) == 1:
+                signature = inspect.signature(module_class.__init__)
+                # If the module's `__init__` method contains specific keyword arguments like `model_args` and `config_args`,
+                # it is likely Transformer-based. These arguments are commonly used in Transformer models to configure
+                # the model and tokenizer during initialization.
+                # Example: Models with custom modules on the Hugging Face Hub like
+                # https://huggingface.co/jinaai/jina-embeddings-v3 may use this logic.
+                if {"model_args", "config_args"} <= set(signature.parameters):
+                    # Load initialization arguments specific to Transformer-based modules. This includes
+                    # arguments for loading the model, tokenizer, and configuration, as well as any
+                    # additional module-specific keyword arguments.
+                    common_transformer_init_kwargs = Transformer._load_init_kwargs(
                         model_name_or_path,
-                        config_name,
+                        # Loading-specific keyword arguments
+                        subfolder=module_config["path"],
                         token=token,
                         cache_folder=cache_folder,
                         revision=revision,
                         local_files_only=local_files_only,
+                        # Module-specific keyword arguments
+                        trust_remote_code=trust_remote_code,
+                        model_kwargs=model_kwargs,
+                        tokenizer_kwargs=tokenizer_kwargs,
+                        config_kwargs=config_kwargs,
+                        backend=self.backend,
                     )
-                    if config_path is not None:
-                        with open(config_path) as fIn:
-                            kwargs = json.load(fIn)
-                            # Don't allow configs to set trust_remote_code
-                            if "model_args" in kwargs and "trust_remote_code" in kwargs["model_args"]:
-                                kwargs["model_args"].pop("trust_remote_code")
-                            if "tokenizer_args" in kwargs and "trust_remote_code" in kwargs["tokenizer_args"]:
-                                kwargs["tokenizer_args"].pop("trust_remote_code")
-                            if "config_args" in kwargs and "trust_remote_code" in kwargs["config_args"]:
-                                kwargs["config_args"].pop("trust_remote_code")
-                        break
+                    module = module_class(model_name_or_path, **common_transformer_init_kwargs)
 
-                hub_kwargs = {
-                    "token": token,
-                    "trust_remote_code": trust_remote_code,
-                    "revision": revision,
-                    "local_files_only": local_files_only,
-                }
-                # 3rd priority: config file
-                if "model_args" not in kwargs:
-                    kwargs["model_args"] = {}
-                if "tokenizer_args" not in kwargs:
-                    kwargs["tokenizer_args"] = {}
-                if "config_args" not in kwargs:
-                    kwargs["config_args"] = {}
-
-                # 2nd priority: hub_kwargs
-                kwargs["model_args"].update(hub_kwargs)
-                kwargs["tokenizer_args"].update(hub_kwargs)
-                kwargs["config_args"].update(hub_kwargs)
-
-                # 1st priority: kwargs passed to SentenceTransformer
-                if model_kwargs:
-                    kwargs["model_args"].update(model_kwargs)
-                if tokenizer_kwargs:
-                    kwargs["tokenizer_args"].update(tokenizer_kwargs)
-                if config_kwargs:
-                    kwargs["config_args"].update(config_kwargs)
-
-                # Try to initialize the module with a lot of kwargs, but only if the module supports them
-                # Otherwise we fall back to the load method
-                try:
-                    module = module_class(model_name_or_path, cache_dir=cache_folder, backend=self.backend, **kwargs)
-                except TypeError:
-                    module = module_class.load(model_name_or_path)
-            else:
-                # Normalize does not require any files to be loaded
-                if module_class == Normalize:
-                    module_path = None
                 else:
-                    module_path = load_dir_path(
-                        model_name_or_path,
-                        module_config["path"],
+                    # Old modules that don't support the new loading method and don't seem Transformer-based
+                    # are loaded by downloading the full directories and calling .load() with the old style
+                    # (i.e. only a path to the local directory)
+                    local_path = load_dir_path(
+                        model_name_or_path=model_name_or_path,
+                        subfolder=module_config["path"],
                         token=token,
                         cache_folder=cache_folder,
                         revision=revision,
                         local_files_only=local_files_only,
                     )
-                module = module_class.load(module_path)
+                    module = module_class.load(local_path)
+
+            else:
+                # Newer modules that support the new loading method are loaded with the new style
+                # i.e. with many keyword arguments that can optionally be used by the modules
+                module = module_class.load(
+                    model_name_or_path,
+                    # Loading-specific keyword arguments
+                    subfolder=module_config["path"],
+                    token=token,
+                    cache_folder=cache_folder,
+                    revision=revision,
+                    local_files_only=local_files_only,
+                    # Module-specific keyword arguments
+                    trust_remote_code=trust_remote_code,
+                    model_kwargs=model_kwargs,
+                    tokenizer_kwargs=tokenizer_kwargs,
+                    config_kwargs=config_kwargs,
+                    backend=self.backend,
+                )
 
             modules[module_config["name"]] = module
             module_kwargs[module_config["name"]] = module_config.get("kwargs", [])
@@ -1837,6 +1889,7 @@ print(similarities)
         return modules, module_kwargs
 
     @staticmethod
+    @deprecated("SentenceTransformer.load(...) is deprecated, use SentenceTransformer(...) instead.")
     def load(input_path) -> SentenceTransformer:
         return SentenceTransformer(input_path)
 
@@ -1846,9 +1899,9 @@ print(similarities)
         Get torch.device from module, assuming that the whole module has one device.
         In case there are no PyTorch parameters, fall back to CPU.
         """
-        if isinstance(self[0], Transformer):
-            return self[0].auto_model.device
-
+        for child in self.modules():
+            if isinstance(child, PreTrainedModel) and hasattr(child, "device"):
+                return child.device
         try:
             return next(self.parameters()).device
         except StopIteration:
@@ -1939,6 +1992,50 @@ print(similarities)
 
     def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None) -> None:
         # Propagate the gradient checkpointing to the transformer model
-        for module in self:
-            if isinstance(module, Transformer):
-                return module.auto_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+        for child in self.modules():
+            if isinstance(child, PreTrainedModel):
+                return child.gradient_checkpointing_enable(gradient_checkpointing_kwargs)
+
+    def _get_model_type(
+        self,
+        model_name_or_path: str,
+        token: bool | str | None,
+        cache_folder: str | None,
+        revision: str | None = None,
+        local_files_only: bool = False,
+    ) -> str | None:
+        """
+        Retrieves the model_type from the config_sentence_transformers.json file.
+
+        This is used to determine the appropriate loading method:
+        - SentenceTransformer: These models should be loaded with _load_sbert_model when used with SentenceTransformer class
+        - SparseEncoder: These models should be loaded with _load_auto_model when used with SentenceTransformer class
+
+        When a model type doesn't match the class being used to load it, we switch loading methods
+        to ensure compatibility.
+
+        Args:
+            model_name_or_path (str): The name or path of the pre-trained model.
+            token (Optional[Union[bool, str]]): The token to use for the model.
+            cache_folder (Optional[str]): The folder to cache the model.
+            revision (Optional[str], optional): The revision of the model. Defaults to None.
+            local_files_only (bool, optional): Whether to use only local files. Defaults to False.
+
+        Returns:
+            Optional[str]: The model type (SentenceTransformer or SparseEncoder) if available, None otherwise.
+        """
+        config_sentence_transformers_json_path = load_file_path(
+            model_name_or_path,
+            "config_sentence_transformers.json",
+            token=token,
+            cache_folder=cache_folder,
+            revision=revision,
+            local_files_only=local_files_only,
+        )
+
+        if config_sentence_transformers_json_path is None:
+            return "SentenceTransformer"
+
+        with open(config_sentence_transformers_json_path) as fIn:
+            config = json.load(fIn)
+            return config.get("model_type", "SentenceTransformer")  # Default to "SentenceTransformer" if not specified

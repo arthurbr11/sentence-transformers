@@ -9,6 +9,7 @@ from copy import copy
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from platform import python_version
+from pprint import pformat
 from textwrap import indent
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -57,8 +58,6 @@ class SentenceTransformerModelCardCallback(TrainerCallback):
         trainer: SentenceTransformerTrainer,
         **kwargs,
     ) -> None:
-        from sentence_transformers.losses import AdaptiveLayerLoss, Matryoshka2dLoss, MatryoshkaLoss
-
         model.model_card_data.add_tags("generated_from_trainer")
 
         # Try to set the code carbon callback if it exists
@@ -79,22 +78,7 @@ class SentenceTransformerModelCardCallback(TrainerCallback):
                 trainer.eval_dataset, model.model_card_data.eval_datasets, trainer.loss, "eval"
             )
 
-        if isinstance(trainer.loss, dict):
-            losses = list(trainer.loss.values())
-        else:
-            losses = [trainer.loss]
-        # Some losses are known to use other losses internally, e.g. MatryoshkaLoss, AdaptiveLayerLoss and Matryoshka2dLoss
-        # So, verify for `loss` attributes in the losses
-        loss_idx = 0
-        while loss_idx < len(losses):
-            loss = losses[loss_idx]
-            if (
-                isinstance(loss, (MatryoshkaLoss, AdaptiveLayerLoss, Matryoshka2dLoss))
-                and hasattr(loss, "loss")
-                and loss.loss not in losses
-            ):
-                losses.append(loss.loss)
-            loss_idx += 1
+        losses = get_losses(trainer.loss)
 
         model.model_card_data.set_losses(losses)
 
@@ -153,7 +137,11 @@ class SentenceTransformerModelCardCallback(TrainerCallback):
         metrics: dict[str, float],
         **kwargs,
     ) -> None:
-        loss_dict = {" ".join(key.split("_")[1:]): metrics[key] for key in metrics if key.endswith("_loss")}
+        loss_dict = {
+            " ".join(key.split("_")[1:]): metrics[key]
+            for key in metrics
+            if key.startswith("eval_") and key.endswith("_loss")
+        }
         if len(loss_dict) == 1 and "loss" in loss_dict:
             loss_dict = {"Validation Loss": loss_dict["loss"]}
         if (
@@ -248,6 +236,24 @@ def format_log(value: float | int | str) -> Any:
     return value
 
 
+def get_losses(loss: nn.Module | dict[nn.Module]) -> list[nn.Module]:
+    if isinstance(loss, dict):
+        losses = list(loss.values())
+    else:
+        losses = [loss]
+    # Some losses are known to use other losses internally
+    # So, verify for `loss` attributes in the losses
+    loss_idx = 0
+    while loss_idx < len(losses):
+        loss = losses[loss_idx]
+        if hasattr(loss, "loss") and loss.loss not in losses:
+            losses.append(loss.loss)
+        if hasattr(loss, "regularizer") and loss.regularizer not in losses:
+            losses.append(loss.regularizer)
+        loss_idx += 1
+    return losses
+
+
 @dataclass
 class SentenceTransformerModelCardData(CardData):
     """A dataclass storing data used in the model card.
@@ -303,6 +309,7 @@ class SentenceTransformerModelCardData(CardData):
             "sentence-transformers",
             "sentence-similarity",
             "feature-extraction",
+            "dense",
         ]
     )
     generate_widget_examples: Literal["deprecated"] = "deprecated"
@@ -330,7 +337,7 @@ class SentenceTransformerModelCardData(CardData):
     pipeline_tag: str = field(default="sentence-similarity", init=False)
     library_name: str = field(default="sentence-transformers", init=False)
     version: dict[str, str] = field(default_factory=get_versions, init=False)
-    template_path: Path = field(default=Path(__file__).parent / "model_card_template.md", init=False)
+    template_path: Path = field(default=Path(__file__).parent / "model_card_template.md", init=False, repr=False)
 
     # Passed via `register_model` only
     model: SentenceTransformer | None = field(default=None, init=False, repr=False)
@@ -490,9 +497,22 @@ class SentenceTransformerModelCardData(CardData):
                 if len(sentences) < 4:
                     continue
 
-                self.widget.append(
-                    {"source_sentence": sentences[0], "sentences": random.sample(sentences[1:], k=len(sentences) - 1)}
-                )
+                # When training with an Asym module, you might be using a dictionary with a mapping of Asym keys to texts,
+                # So let's grab the texts
+                sentences = [
+                    list(sentence.values())[0] if isinstance(sentence, dict) else sentence for sentence in sentences
+                ]
+
+                if self.pipeline_tag == "sentence-similarity":
+                    self.widget.append(
+                        {
+                            "source_sentence": sentences[0],
+                            "sentences": random.sample(sentences[1:], k=len(sentences) - 1),
+                        }
+                    )
+                else:
+                    # If we have e.g. feature-extraction, we just want individual sentences
+                    self.widget.append({"text": random.choice(sentences)})
                 self.predict_example = sentences[:3]
 
     def set_evaluation_metrics(
@@ -696,10 +716,33 @@ class SentenceTransformerModelCardData(CardData):
         }
         if hasattr(loss, "get_config_dict"):
             config = loss.get_config_dict()
+
+            def format_config_value(value: Any) -> str:
+                if not isinstance(value, nn.Module):
+                    return value
+                module_name = value.__class__.__name__
+                module_args_str = []
+
+                # E.g. SentenceTransformer, SparseEncoder, etc.
+                if hasattr(value, "model_card_data") and hasattr(value.model_card_data, "base_model"):
+                    module_args_str.append(repr(value.model_card_data.base_model))
+                if hasattr(value, "trust_remote_code") and value.trust_remote_code:
+                    module_args_str.append("trust_remote_code=True")
+                # E.g. MultipleNegativesRankingLoss, CosineSimilarityLoss, etc.
+                if hasattr(value, "get_config_dict"):
+                    for key, val in value.get_config_dict().items():
+                        module_args_str.append(f"{key}={repr(val)}")
+
+                if module_args_str:
+                    return f"{module_name}({', '.join(module_args_str)})"
+                return module_name
+
+            config = {key: format_config_value(value) for key, value in config.items()}
+
             try:
                 str_config = json.dumps(config, indent=4)
             except TypeError:
-                str_config = str(config)
+                str_config = pformat(config, indent=4)
             dataset_info["loss"]["config_code"] = indent(f"```json\n{str_config}\n```", "  ")
         return dataset_info
 
@@ -1003,6 +1046,12 @@ class SentenceTransformerModelCardData(CardData):
             "similarity_fn_name": similarity_fn_name,
         }
 
+    def get_default_model_name(self) -> None:
+        if self.base_model:
+            return f"{self.model.__class__.__name__} based on {self.base_model}"
+        else:
+            return self.model.__class__.__name__
+
     def to_dict(self) -> dict[str, Any]:
         # Try to set the base model
         if self.first_save and not self.base_model:
@@ -1013,10 +1062,7 @@ class SentenceTransformerModelCardData(CardData):
 
         # Set the model name
         if not self.model_name:
-            if self.base_model:
-                self.model_name = f"{self.model.__class__.__name__} based on {self.base_model}"
-            else:
-                self.model_name = self.model.__class__.__name__
+            self.model_name = self.get_default_model_name()
 
         super_dict = {field.name: getattr(self, field.name) for field in fields(self)}
 

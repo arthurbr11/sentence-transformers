@@ -3,7 +3,6 @@ from __future__ import annotations
 import heapq
 import logging
 import os
-from contextlib import nullcontext
 from typing import TYPE_CHECKING, Callable
 
 import numpy as np
@@ -292,15 +291,12 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
         )
 
         # Compute embedding for the queries
-        with nullcontext() if self.truncate_dim is None else model.truncate_sentence_embeddings(self.truncate_dim):
-            query_embeddings = model.encode(
-                self.queries,
-                prompt_name=self.query_prompt_name,
-                prompt=self.query_prompt,
-                batch_size=self.batch_size,
-                show_progress_bar=self.show_progress_bar,
-                convert_to_tensor=True,
-            )
+        query_embeddings = self.embed_inputs(
+            model,
+            self.queries,
+            prompt_name=self.query_prompt_name,
+            prompt=self.query_prompt,
+        )
 
         queries_result_list = {}
         for name in self.score_functions:
@@ -314,19 +310,12 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
 
             # Encode chunk of corpus
             if corpus_embeddings is None:
-                with (
-                    nullcontext()
-                    if self.truncate_dim is None
-                    else corpus_model.truncate_sentence_embeddings(self.truncate_dim)
-                ):
-                    sub_corpus_embeddings = corpus_model.encode(
-                        self.corpus[corpus_start_idx:corpus_end_idx],
-                        prompt_name=self.corpus_prompt_name,
-                        prompt=self.corpus_prompt,
-                        batch_size=self.batch_size,
-                        show_progress_bar=self.show_progress_bar,
-                        convert_to_tensor=True,
-                    )
+                sub_corpus_embeddings = self.embed_inputs(
+                    corpus_model,
+                    self.corpus[corpus_start_idx:corpus_end_idx],
+                    prompt_name=self.corpus_prompt_name,
+                    prompt=self.corpus_prompt,
+                )
             else:
                 sub_corpus_embeddings = corpus_embeddings[corpus_start_idx:corpus_end_idx]
 
@@ -375,6 +364,25 @@ class InformationRetrievalEvaluator(SentenceEvaluator):
             self.output_scores(scores[name])
 
         return scores
+
+    def embed_inputs(
+        self,
+        model: SentenceTransformer,
+        sentences: str | list[str] | np.ndarray,
+        prompt_name: str | None = None,
+        prompt: str | None = None,
+        **kwargs,
+    ) -> np.ndarray:
+        return model.encode(
+            sentences,
+            prompt_name=prompt_name,
+            prompt=prompt,
+            batch_size=self.batch_size,
+            show_progress_bar=self.show_progress_bar,
+            convert_to_tensor=True,
+            truncate_dim=self.truncate_dim,
+            **kwargs,
+        )
 
     def compute_metrics(self, queries_result_list: list[object]):
         # Init score computation values

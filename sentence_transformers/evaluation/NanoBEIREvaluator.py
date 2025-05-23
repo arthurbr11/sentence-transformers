@@ -186,6 +186,8 @@ class NanoBEIREvaluator(SentenceEvaluator):
             # => 0.8084508771660436
     """
 
+    information_retrieval_class = InformationRetrievalEvaluator
+
     def __init__(
         self,
         dataset_names: list[DatasetNameType] | None = None,
@@ -246,7 +248,6 @@ class NanoBEIREvaluator(SentenceEvaluator):
             "score_functions": score_functions,
             "main_score_function": main_score_function,
         }
-
         self.evaluators = [
             self._load_dataset(name, **ir_evaluator_kwargs)
             for name in tqdm(self.dataset_names, desc="Loading NanoBEIR datasets", leave=False)
@@ -296,18 +297,17 @@ class NanoBEIREvaluator(SentenceEvaluator):
             self.score_function_names = [model.similarity_fn_name]
             self._append_csv_headers(self.score_function_names)
 
+        num_underscores_in_name = self.name.count("_")
         for evaluator in tqdm(self.evaluators, desc="Evaluating datasets", disable=not self.show_progress_bar):
             logger.info(f"Evaluating {evaluator.name}")
             evaluation = evaluator(model, output_path, epoch, steps)
-            for k in evaluation:
-                if self.truncate_dim:
-                    dataset, _, metric = k.split("_", maxsplit=2)
-                else:
-                    dataset, metric = k.split("_", maxsplit=1)
+            for full_key, metric_value in evaluation.items():
+                splits = full_key.split("_", maxsplit=num_underscores_in_name)
+                metric = splits[-1]
                 if metric not in per_metric_results:
                     per_metric_results[metric] = []
-                per_dataset_results[dataset + "_" + metric] = evaluation[k]
-                per_metric_results[metric].append(evaluation[k])
+                per_dataset_results[full_key] = metric_value
+                per_metric_results[metric].append(metric_value)
 
         agg_results = {}
         for metric in per_metric_results:
@@ -412,7 +412,7 @@ class NanoBEIREvaluator(SentenceEvaluator):
         if self.corpus_prompts is not None:
             ir_evaluator_kwargs["corpus_prompt"] = self.corpus_prompts.get(dataset_name, None)
         human_readable_name = self._get_human_readable_name(dataset_name)
-        return InformationRetrievalEvaluator(
+        return self.information_retrieval_class(
             queries=queries_dict,
             corpus=corpus_dict,
             relevant_docs=qrels_dict,
