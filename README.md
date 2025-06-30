@@ -172,7 +172,7 @@ We provide a large list of pretrained models for more than 100 languages. Some m
 
 * [Pretrained Sentence Transformer (Embedding) Models](https://sbert.net/docs/sentence_transformer/pretrained_models.html)
 * [Pretrained Cross Encoder (Reranker) Models](https://sbert.net/docs/cross_encoder/pretrained_models.html)
-* [Pretrained Spase Encoder (Sparse Embeddings) Models](https://sbert.net/docs/sparse_encoder/pretrained_models.html)
+* [Pretrained Sparse Encoder (Sparse Embeddings) Models](https://sbert.net/docs/sparse_encoder/pretrained_models.html)
 
 ## Training
 
@@ -212,7 +212,7 @@ You can use this framework for:
 
 - **Retrieve & Re-Rank**
   - [Dense only Retrieval](https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html)
-  - [Sparse/Dense/HYbrid Retrieval](https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html)
+  - [Sparse/Dense/Hybrid Retrieval](https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html)
 
 - [Clustering](https://www.sbert.net/examples/sentence_transformer/applications/clustering/README.html)
 - [Paraphrase Mining](https://www.sbert.net/examples/sentence_transformer/applications/paraphrase-mining/README.html)
