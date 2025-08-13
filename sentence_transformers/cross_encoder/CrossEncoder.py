@@ -641,6 +641,19 @@ class CrossEncoder(nn.Module, PushToHubMixin, FitMixin):
         self.eval()
         for start_index in trange(0, len(sentences), batch_size, desc="Batches", disable=not show_progress_bar):
             batch = sentences[start_index : start_index + batch_size]
+            task = "Given a web search query, retrieve relevant passages that answer the query"
+
+            def format_queries(query, instruction=None):
+                prefix = '<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n'
+                if instruction is None:
+                    instruction = "Given a web search query, retrieve relevant passages that answer the query"
+                return f"{prefix}<Instruct>: {instruction}\n<Query>: {query}\n"
+
+            def format_document(document):
+                suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+                return f"<Document>: {document}{suffix}"
+
+            batch = [[format_queries(query, task), format_document(doc)] for query, doc in batch]
             features = self.tokenizer(
                 batch,
                 padding=True,

@@ -8,6 +8,7 @@ from .SparseCosineSimilarityLoss import SparseCosineSimilarityLoss
 from .SparseDistillKLDivLoss import SparseDistillKLDivLoss
 from .SparseMarginMSELoss import SparseMarginMSELoss
 from .SparseMSELoss import SparseMSELoss
+from .SparseMultiDistillationLoss import SparseMultiDistillationLoss
 from .SparseMultipleNegativesRankingLoss import SparseMultipleNegativesRankingLoss
 from .SparseTripletLoss import SparseTripletLoss
 from .SpladeLoss import SpladeLoss
@@ -25,4 +26,5 @@ __all__ = [
     "SparseDistillKLDivLoss",
     "FlopsLoss",
     "SpladeLoss",
+    "SparseMultiDistillationLoss",
 ]

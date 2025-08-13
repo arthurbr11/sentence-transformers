@@ -8,6 +8,7 @@ As loss function, we use MarginMSELoss in the SpladeLoss.
 
 import argparse
 import logging
+import os
 import traceback
 
 from datasets import load_from_disk
@@ -19,9 +20,12 @@ from sentence_transformers import (
     SparseEncoderTrainingArguments,
 )
 from sentence_transformers.sparse_encoder import evaluation, losses
+from sentence_transformers.training_args import MultiDatasetBatchSamplers
 
 # Set the log level to INFO to get more information
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
+
+SPLITS = ["fever", "hotpot", "msmarco", "nq", "stack", "squad"]
 
 
 def main():
@@ -67,15 +71,17 @@ def main():
     logging.info("Model max length: %s", model.max_seq_length)
 
     # 2. Load the MS MARCO dataset: https://huggingface.co/datasets/sentence-transformers/msmarco
+    train_dataset = {}
+    eval_dataset = {}
 
-    # train_dataset_path = "datasets/ms-marco-train-hard-negatives-1"
-    # eval_dataset_path = "datasets/ms-marco-eval-hard-negatives-1"
-    # train_dataset = load_from_disk(train_dataset_path)
-    # eval_dataset = load_from_disk(eval_dataset_path)
-    datasets = load_from_disk(dataset_name)
-    eval_dataset = datasets["eval"]
-    train_dataset = datasets["train"]
+    for split in SPLITS:
+        subset_path = os.path.join(dataset_name, split)
+        subset = load_from_disk(subset_path)
+        train_dataset[split] = subset["train"]
+        eval_dataset[split] = subset["eval"]
 
+    logging.info(train_dataset)
+    logging.info(eval_dataset)
     logging.info(train_dataset)
     # 3. Define our training loss
     loss = losses.SpladeLoss(
@@ -102,6 +108,7 @@ def main():
         metric_for_best_model="eval_NanoBEIR_mean_dot_ndcg@10",
         fp16=False,  # Set to False if you get an error that your GPU can't run on FP16
         bf16=True,  # Set to True if you have a GPU that supports BF16
+        multi_dataset_batch_sampler=MultiDatasetBatchSamplers.PROPORTIONAL,
         # Optional tracking/debugging parameters:
         eval_strategy="epoch",
         save_strategy="epoch",

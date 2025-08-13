@@ -547,7 +547,7 @@ class SentenceTransformerTrainer(Trainer):
         )
 
         # If the evaluator is not defined, we can just return the output
-        if self.evaluator is None or not self.is_local_process_zero():
+        if self.evaluator is None:
             return output
 
         # If we are training and eval_dataset is a DatasetDict, then we should

@@ -28,9 +28,9 @@ logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:
 
 
 def main():
-    model_name = "distilbert/distilbert-base-uncased"
+    model_name = "cmarkea/distilcamembert-base"
 
-    train_batch_size = 12
+    train_batch_size = 32
     num_epochs = 1
 
     # 1a. Load a model to finetune with 1b. (Optional) model card data
@@ -39,7 +39,7 @@ def main():
         model_card_data=SparseEncoderModelCardData(
             language="en",
             license="apache-2.0",
-            model_name="splade-distilbert-base-uncased trained on Natural Questions",
+            model_name="splade-cmarkea-distilcamembert-base trained on Natural Questions",
         ),
     )
     model.max_seq_length = 256  # Set the max sequence length to 256 for the training
@@ -55,8 +55,8 @@ def main():
     logging.info(eval_dataset)
 
     # 3. Define our training loss.
-    query_regularizer_weight = 5e-5
-    document_regularizer_weight = 3e-5
+    query_regularizer_weight = 5e-2
+    document_regularizer_weight = 5e-3
 
     loss = losses.SpladeLoss(
         model=model,
@@ -80,7 +80,7 @@ def main():
         num_train_epochs=num_epochs,
         per_device_train_batch_size=train_batch_size,
         per_device_eval_batch_size=train_batch_size,
-        learning_rate=2e-5,
+        learning_rate=1e-4,
         fp16=False,  # Set to False if you get an error that your GPU can't run on FP16
         bf16=True,  # Set to True if you have a GPU that supports BF16
         batch_sampler=BatchSamplers.NO_DUPLICATES,  # MultipleNegativesRankingLoss benefits from no duplicate samples in a batch
@@ -90,9 +90,9 @@ def main():
         eval_strategy="steps",
         eval_steps=1650,
         save_strategy="steps",
-        save_steps=1650,
+        save_steps=200,
         save_total_limit=2,
-        logging_steps=200,
+        logging_steps=20,
         run_name=run_name,  # Will be used in W&B if `wandb` is installed
         seed=42,
     )

@@ -8,6 +8,7 @@ As loss function, we use MultipleNegativesRankingLoss in the SpladeLoss.
 """
 
 import logging
+import random
 import traceback
 
 from datasets import load_dataset
@@ -26,13 +27,13 @@ logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:
 
 
 def main():
-    model_name = "distilbert/distilbert-base-uncased"
+    model_name = "EuroBERT/EuroBERT-210m"
 
-    train_batch_size = 16
+    train_batch_size = 32
     num_epochs = 1
     query_regularizer_weight = 5e-5
     document_regularizer_weight = 1e-3
-    learning_rate = 2e-5
+    learning_rate = 4e-5
 
     # 1. Define our SparseEncoder model
     model = SparseEncoder(
@@ -47,14 +48,15 @@ def main():
     logging.info("Model max length: %s", model.max_seq_length)
 
     # 2. Load the MS MARCO dataset: https://huggingface.co/datasets/sentence-transformers/msmarco
-    dataset_size = 100_000  # We only use the first 100k samples for training
+    dataset_size = 1000  # We only use the first 100k samples for training
     logging.info("The dataset has not been fully stored as texts on disk yet. We will do this now.")
     corpus = load_dataset("sentence-transformers/msmarco", "corpus", split="train")
     corpus = dict(zip(corpus["passage_id"], corpus["passage"]))
     queries = load_dataset("sentence-transformers/msmarco", "queries", split="train")
     queries = dict(zip(queries["query_id"], queries["query"]))
     dataset = load_dataset("sentence-transformers/msmarco", "triplets", split="train")
-    dataset = dataset.select(range(dataset_size))
+    random_indices = random.sample(range(len(dataset)), dataset_size)
+    dataset = dataset.select(random_indices)
 
     def id_to_text_map(batch):
         return {

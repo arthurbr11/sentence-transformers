@@ -67,3 +67,13 @@ tmp
 .DS_Store
 /runs
 /tmp_trainer/
+
+/datasets/
+/models/
+/qdrant_storage/
+/runs/
+/logs/
+/draft.py
+/.github/info/
+examples/sparse_encoder/training/distillation/train_msmarco_hard_neg_paper_reproc.py
+results/
