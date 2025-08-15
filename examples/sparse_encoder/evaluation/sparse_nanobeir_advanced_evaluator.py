@@ -69,8 +69,9 @@ Precision@5: 27.75%
 Recall@5: 56.57%
 Precision@10: 19.24%
 Recall@10: 64.31%
-MRR@10: 0.6848
-NDCG@10: 0.6218
+MRR@10: 0.6847
+NDCG@10: 0.6217
+MAP@100: 0.5440
 Model Query Sparsity: Active Dimensions: 72.7, Sparsity Ratio: 0.9976
 Model Corpus Sparsity: Active Dimensions: 165.9, Sparsity Ratio: 0.9946
 

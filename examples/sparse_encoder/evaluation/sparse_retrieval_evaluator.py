@@ -46,29 +46,27 @@ Queries: 323
 Corpus: 3269
 
 Score-Function: dot
-Accuracy@1: 50.15%
-Accuracy@3: 64.40%
-Accuracy@5: 67.18%
-Accuracy@10: 72.14%
-Precision@1: 50.15%
-Precision@3: 40.25%
-Precision@5: 34.06%
-Precision@10: 26.01%
-Recall@1: 6.24%
-Recall@3: 11.65%
-Recall@5: 13.80%
-Recall@10: 17.26%
-MRR@10: 0.5784
-NDCG@10: 0.3614
-MAP@100: 0.1832
+Accuracy@1: 49.23%
+Accuracy@3: 63.47%
+Accuracy@5: 66.56%
+Accuracy@10: 71.83%
+Precision@1: 49.23%
+Precision@3: 39.63%
+Precision@5: 33.13%
+Precision@10: 25.23%
+Recall@1: 6.08%
+Recall@3: 11.60%
+Recall@5: 13.47%
+Recall@10: 17.01%
+MRR@10: 0.5706
+NDCG@10: 0.3530
+MAP@100: 0.1778
 Model Query Sparsity: Active Dimensions: 40.0, Sparsity Ratio: 0.9987
-Model Corpus Sparsity: Active Dimensions: 206.3, Sparsity Ratio: 0.9932
+Model Corpus Sparsity: Active Dimensions: 206.2, Sparsity Ratio: 0.9932
 Average FLOPS: 4.7
-Primary metric: BeIR-nfcorpus-subset-test_dot_ndcg@10
-Primary metric value: 0.3614
 """
 # Print the results
 print(f"Primary metric: {ir_evaluator.primary_metric}")
 # => Primary metric: BeIR-nfcorpus-subset-test_dot_ndcg@10
 print(f"Primary metric value: {results[ir_evaluator.primary_metric]:.4f}")
-# => Primary metric value: 0.Primary metric value: 0.3621
+# => Primary metric value: 0.Primary metric value: 0.3530
