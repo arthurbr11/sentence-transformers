@@ -1,23 +1,56 @@
 import logging
+import os
+
+from tqdm import tqdm
 
 from sentence_transformers import SparseEncoder
 from sentence_transformers.sparse_encoder.evaluation import SparseNanoBEIREvaluator
 
 logging.basicConfig(format="%(message)s", level=logging.INFO)
+model_to_eval = [
+    # "naver/splade-cocondenser-ensembledistil",
+    # "naver/splade-v3",
+    # "naver/splade-v3-distilbert",
+    # "prithivida/Splade_PP_en_v1",
+    # "prithivida/Splade_PP_en_v2",
+    # "ibm-granite/granite-embedding-30m-sparse",
+    # "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte",
+    # "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill",
+    # "opensearch-project/opensearch-neural-sparse-encoding-doc-v2-distill",
+    # "opensearch-project/opensearch-neural-sparse-encoding-v2-distill",
+]
 
-# Load a model
-model = SparseEncoder("opensearch-project/opensearch-neural-sparse-encoding-v2-distill")
-model.max_seq_length = 512  # Set the max sequence length to 256 for the evaluation
+# Add custom models
+custom_models = [
+    #     "models/splade-co-condenser-marco-msmarco-cross_scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.08/checkpoint-105030",
+    #     "models/splade-co-condenser-marco-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-70020",
+    #     "models/splade-co-condenser-marco-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.3/checkpoint-46680",
+    #     "models/merged_model-1",
+    #     "models/merged_model-2",
+    "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-58350",
+    "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-85580",
+]
 
+for model_name in tqdm(model_to_eval + custom_models):
+    for context_length in [256, 512]:
+        path = f"results/{model_name.replace('/', '__')}_trunc_d256_q128/NanoBEIR_{context_length}"
+        if os.path.exists(path):
+            print(f"Results already exist for {model_name} with context length {context_length}. Skipping...")
+            continue
+        # Load a model
+        model = SparseEncoder(model_name, trust_remote_code=True)
+        model.max_seq_length = context_length  # Set the max sequence length for the evaluation
 
-evaluator = SparseNanoBEIREvaluator(
-    dataset_names=None,  # None means evaluate on all datasets
-    show_progress_bar=True,
-    batch_size=32,
-)
+        evaluator = SparseNanoBEIREvaluator(
+            dataset_names=None,  # None means evaluate on all datasets
+            show_progress_bar=True,
+            batch_size=32,
+            max_active_dims=256,
+        )
 
-# Run evaluation
-results = evaluator(model)
+        os.makedirs(path, exist_ok=True)
+        # Run evaluation
+        results = evaluator(model, output_path=path)
 """
 ----------------------------------------------- naver/splade-cocondenser-ensembledistil_512
 Average Queries: 49.92307692307692
@@ -445,8 +478,3 @@ Primary metric: NanoBEIR_mean_dot_ndcg@10
 Primary metric value: 0.6337
 
 """
-# Print the results
-print(f"Primary metric: {evaluator.primary_metric}")
-# => Primary metric: NanoBEIR_mean_dot_ndcg@10
-print(f"Primary metric value: {results[evaluator.primary_metric]:.4f}")
-# => Primary metric value: 0.6218
