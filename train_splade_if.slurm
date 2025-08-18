@@ -14,21 +14,23 @@
 
 # Define scripts and GPU assignments
 SCRIPTS=(
-    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse.py"
-    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse.py"
+    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse_if.py"
+    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse_if.py"
+    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse_if.py"
+    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse_if.py"
+
 )
 
 # Define constants for training parameters
 MODEL_NAMES=(
-"answerdotai/ModernBERT-base"    "answerdotai/ModernBERT-base"
+"jhu-clsp/ettin-encoder-68m"    "jhu-clsp/ettin-encoder-68m" "jhu-clsp/ettin-encoder-32m"    "jhu-clsp/ettin-encoder-32m"
 )
-N_GPUS=(4 4)
-TRAIN_BATCH_SIZES=(32 32)
-NUM_EPOCHS=(37 37)
-QUERY_REGULARIZER_WEIGHTS=(0.1 0.3)
-DOCUMENT_REGULARIZER_WEIGHTS=(0.1 0.25)
-LEARNING_RATES=(8e-5 8e-5)
-DATASET_NAMES=("datasets/msmarco-Qwen3-8B-scores-4" "datasets/msmarco-Qwen3-8B-scores-4")
+N_GPUS=(2 2 2 2)
+TRAIN_BATCH_SIZES=(64 64 64 64)
+NUM_EPOCHS=(37 37 37 37) 
+DOCUMENT_REGULARIZER_WEIGHTS=(0.1 0.25 0.1 0.25)
+LEARNING_RATES=(8e-5 8e-5 8e-5 8e-5)
+DATASET_NAMES=("datasets/msmarco-Qwen3-8B-scores-4" "datasets/msmarco-Qwen3-8B-scores-4" "datasets/msmarco-Qwen3-8B-scores-4" "datasets/msmarco-Qwen3-8B-scores-4")
 
 cd /fsx/arthur_bresnu/projects/sentence-transformers
 source .venv/bin/activate
@@ -42,14 +44,13 @@ for ((TASK_ID=0; TASK_ID<${#SCRIPTS[@]}; TASK_ID++)); do
     N_GPU=${N_GPUS[$TASK_ID]}
     TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZES[$TASK_ID]}
     NUM_EPOCH=${NUM_EPOCHS[$TASK_ID]}
-    QUERY_REGULARIZER_WEIGHT=${QUERY_REGULARIZER_WEIGHTS[$TASK_ID]}
     DOCUMENT_REGULARIZER_WEIGHT=${DOCUMENT_REGULARIZER_WEIGHTS[$TASK_ID]}
     LEARNING_RATE=${LEARNING_RATES[$TASK_ID]}
     DATASET_NAME=${DATASET_NAMES[$TASK_ID]}
 
     # Calculate the GPU indices for this task
-    GPU_START=$((TASK_ID * 4))
-    GPU_END=$((GPU_START + 3))
+    GPU_START=$((TASK_ID * 2))
+    GPU_END=$((GPU_START + 1))
     export CUDA_VISIBLE_DEVICES=$(seq -s, $GPU_START $GPU_END)
 
     echo "Task $TASK_ID starting at $(date)"
@@ -65,7 +66,6 @@ for ((TASK_ID=0; TASK_ID<${#SCRIPTS[@]}; TASK_ID++)); do
         --n_gpu $N_GPU \
         --train_batch_size $TRAIN_BATCH_SIZE \
         --num_epochs $NUM_EPOCH \
-        --query_regularizer_weight $QUERY_REGULARIZER_WEIGHT \
         --document_regularizer_weight $DOCUMENT_REGULARIZER_WEIGHT \
         --learning_rate $LEARNING_RATE \
         --dataset_name $DATASET_NAME > /fsx/arthur_bresnu/projects/sentence-transformers/logs/train_splade/${SLURM_JOB_ID}_${TASK_ID}.out 2>&1 &

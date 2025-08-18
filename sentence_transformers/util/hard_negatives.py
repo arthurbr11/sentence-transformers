@@ -12,6 +12,7 @@ from tqdm import trange
 from tqdm.autonotebook import tqdm
 
 from .environment import is_datasets_available
+from .retrieval import semantic_search
 
 logger = logging.getLogger(__name__)
 
@@ -451,12 +452,31 @@ def mine_hard_negatives(
         indices = torch.from_numpy(np.concatenate(indices_list, axis=0)).to(device)
 
     else:
-        # Compute the similarity scores between the queries and the corpus
-        scores = model.similarity(query_embeddings, corpus_embeddings).to(device)
+        # Your original call remains the same
+        queries_result_list = semantic_search(
+            query_embeddings=query_embeddings,
+            corpus_embeddings=corpus_embeddings,
+            query_chunk_size=1000,
+            corpus_chunk_size=50000,
+            top_k=range_max + max_positives,
+            score_function=model.similarity,
+        )
 
-        # Keep only the range_max + max_positives highest scores. We offset by 1 to potentially include the positive pair
-        scores, indices = torch.topk(scores, k=range_max + max_positives, dim=1)
+        n_queries = len(queries_result_list)
+        top_k = len(queries_result_list[0])
+        print(f"Found {n_queries} queries and {top_k} top candidates per query.")
 
+        scores_np = np.empty((n_queries, top_k), dtype=np.float64)
+        indices_np = np.empty((n_queries, top_k), dtype=np.int64)
+
+        for qid, query_results in enumerate(queries_result_list):
+            scores_np[qid] = [item["score"] for item in query_results]
+            indices_np[qid] = [item["corpus_id"] for item in query_results]
+
+        scores = torch.from_numpy(scores_np).to(device)
+        indices = torch.from_numpy(indices_np).to(device)
+
+    print(f"Searched {n_queries} queries and found {scores.shape[1]} candidates per query.")
     # As we may have duplicated queries (i.e., a single query with multiple positives),
     # We keep track, for each unique query, of where their positives are in the list of positives (positive_indices).
     # Note that as queries may have differing numbers of positives, we cannot guarantee that this is a fixed-length matrix.
@@ -476,11 +496,13 @@ def mine_hard_negatives(
         all_queries.extend([queries[idx]] * n_positives[idx])
 
     positive_indices = [torch.tensor(p, device=device) for p in positive_indices]
-
+    print(f"Here1: Found {len(positives)} positives for {n_queries} queries.")
     # Compute the positive scores
     query_embeddings = query_embeddings[[idx for idx in range(n_queries) for _ in range(n_positives[idx])]]
     positive_embeddings = corpus_embeddings[torch.cat(positive_indices).tolist()]
     positive_scores = model.similarity_pairwise(query_embeddings, positive_embeddings).to(device)
+
+    print(f"Here2: Found {positive_scores.shape[0]} positive scores for {n_queries} queries.")
 
     del query_embeddings
     del positive_embeddings

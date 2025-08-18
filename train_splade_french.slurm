@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=train_splade_margin_mse_french
-#SBATCH --partition=hopper-extra
+#SBATCH --partition=hopper-prod
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1          # crucial - only 1 task per dist per node!
 #SBATCH --cpus-per-task=24

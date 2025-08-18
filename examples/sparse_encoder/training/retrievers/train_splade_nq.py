@@ -10,6 +10,7 @@ python train_splade_nq.py
 """
 
 import logging
+import os
 import traceback
 
 from datasets import load_dataset
@@ -23,12 +24,14 @@ from sentence_transformers import (
 from sentence_transformers.sparse_encoder import evaluation, losses
 from sentence_transformers.training_args import BatchSamplers
 
+os.environ["WANDB_DISABLED"] = "true"
+
 # Set the log level to INFO to get more information
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
 
 
 def main():
-    model_name = "cmarkea/distilcamembert-base"
+    model_name = "Alibaba-NLP/gte-en-mlm-base"
 
     train_batch_size = 32
     num_epochs = 1
@@ -39,8 +42,9 @@ def main():
         model_card_data=SparseEncoderModelCardData(
             language="en",
             license="apache-2.0",
-            model_name="splade-cmarkea-distilcamembert-base trained on Natural Questions",
+            model_name="splade-gte-base-en-v1.5 trained on Natural Questions",
         ),
+        trust_remote_code=True,  # Required for models that use custom code
     )
     model.max_seq_length = 256  # Set the max sequence length to 256 for the training
     logging.info("Model max length: %s", model.max_seq_length)
@@ -88,9 +92,9 @@ def main():
         metric_for_best_model="eval_NanoBEIR_mean_dot_ndcg@10",
         # Optional tracking/debugging parameters:
         eval_strategy="steps",
-        eval_steps=1650,
+        eval_steps=1600,
         save_strategy="steps",
-        save_steps=200,
+        save_steps=1600,
         save_total_limit=2,
         logging_steps=20,
         run_name=run_name,  # Will be used in W&B if `wandb` is installed

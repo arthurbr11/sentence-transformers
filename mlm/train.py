@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 
-from data import HFDatasetText, SimpleMlmc
+from data import HFDatasetText, MultilingualDataset, SimpleMlmc, TextFileDataset
 from trainer import MergeAndRoundLogsCallback, MlmTrainer
 from transformers import (
     AutoModelForMaskedLM,
@@ -11,6 +12,9 @@ from transformers import (
     TrainingArguments,
     set_seed,
 )
+
+# Set the log level to INFO to get more information
+logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
 
 
 def parse_args():
@@ -27,6 +31,21 @@ def parse_args():
     parser.add_argument("--hf_split", type=str, default="train", help="HF dataset split, e.g., 'train'")
     parser.add_argument("--hf_text_field", type=str, default="text", help="Field name containing the text")
 
+    # Multilingual datasets
+    parser.add_argument(
+        "--multilingual_datasets",
+        type=str,
+        nargs="*",
+        default=None,
+        help="List of dataset paths/directories for multilingual training",
+    )
+    parser.add_argument(
+        "--balance_languages", action="store_true", help="Balance datasets to have equal samples per language"
+    )
+    parser.add_argument(
+        "--max_samples_per_lang", type=int, default=None, help="Maximum samples per language (for memory management)"
+    )
+
     # Data/tokenizer
     parser.add_argument("--max_length", type=int, default=128)
     parser.add_argument("--mlm_probability", type=float, default=0.3)
@@ -38,7 +57,7 @@ def parse_args():
     parser.add_argument("--warmup_ratio", type=float, default=0.0)
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--fp16", action="store_true")
+    parser.add_argument("--bf16", action="store_true")
 
     # Loss
     parser.add_argument("--lambda_flops", type=float, default=1.0)
@@ -101,17 +120,29 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True)
 
-    # Choose data source: HF dataset or local text file
-    if args.hf_dataset is not None:
+    # Choose data source: multilingual datasets, HF dataset, or local text file
+    if args.multilingual_datasets is not None:
+        # Use MultilingualDataset for training on multiple languages
+        dataset = MultilingualDataset(
+            dataset_paths=args.multilingual_datasets,
+            text_field=args.hf_text_field,
+            tokenizer=tokenizer,
+            max_length=args.max_length,
+            balance_languages=args.balance_languages,
+            max_samples_per_lang=args.max_samples_per_lang,
+        )
+    elif args.hf_dataset is not None:
         from datasets import load_dataset
 
         ds = load_dataset(args.hf_dataset, args.hf_subset, split=args.hf_split)
         dataset = HFDatasetText(
             hf_dataset=ds, text_field=args.hf_text_field, tokenizer=tokenizer, max_length=args.max_length
         )
+    elif args.train_file is not None:
+        # Use the new TextFileDataset for text files
+        dataset = TextFileDataset(text_file=args.train_file, tokenizer=tokenizer, max_length=args.max_length)
     else:
-        if not args.train_file:
-            raise ValueError("Either --hf_dataset or --train_file must be provided")
+        raise ValueError("Either --multilingual_datasets, --hf_dataset, or --train_file must be provided")
 
     collator = SimpleMlmc(tokenizer=tokenizer, mlm_probability=args.mlm_probability)
 
@@ -129,7 +160,7 @@ def main():
         warmup_ratio=args.warmup_ratio,
         weight_decay=args.weight_decay,
         seed=args.seed,
-        fp16=args.fp16,
+        bf16=args.bf16,
         logging_strategy="steps",
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,

@@ -8,6 +8,7 @@ As loss function, we use MarginMSELoss in the SpladeLoss.
 
 import argparse
 import logging
+import os
 import traceback
 
 from datasets import load_from_disk
@@ -18,15 +19,21 @@ from sentence_transformers import (
     SparseEncoderTrainer,
     SparseEncoderTrainingArguments,
 )
+from sentence_transformers.evaluation import SequentialEvaluator
 from sentence_transformers.sparse_encoder import evaluation, losses
+from sentence_transformers.training_args import MultiDatasetBatchSamplers
 
 # Set the log level to INFO to get more information
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
 
+LANGS = ["en", "de"]  # , "es", "fr"]
+
 
 def main():
     parser = argparse.ArgumentParser(description="Train a Sparse Encoder model for Information Retrieval.")
-    parser.add_argument("--model_name", type=str, default="Luyu/co-condenser-marco", help="Model name.")
+    parser.add_argument(
+        "--model_name", type=str, default="google-bert/bert-base-multilingual-uncased", help="Model name."
+    )
     parser.add_argument("--n_gpu", type=int, default=4, help="Number of GPUs to use.")
     parser.add_argument("--train_batch_size", type=int, default=32, help="Training batch size per device.")
     parser.add_argument("--num_epochs", type=int, default=35, help="Number of training epochs.")
@@ -36,7 +43,7 @@ def main():
     parser.add_argument(
         "--dataset_name",
         type=str,
-        default="datasets/msmarco-cross-scores-4",
+        default="datasets/swim-ir-monolingual-Qwen3-8B-scores-4",
         help="Dataset name.",
     )
 
@@ -51,33 +58,33 @@ def main():
     document_regularizer_weight = args.document_regularizer_weight
     learning_rate = args.learning_rate
     dataset_name = args.dataset_name
+    run_name = f"splade-{short_model_name}-{dataset_name.split('/')[-1]}-bs_{train_batch_size * n_gpu}-lr_{learning_rate}-lq_{query_regularizer_weight}-ld_{document_regularizer_weight}"
 
     # 1. Define our SparseEncoder model
     model = SparseEncoder(
         model_name,
         model_card_data=SparseEncoderModelCardData(
-            language="en",
-            license="apache-2.0",
-            model_name=f"splade-{short_model_name} trained on MS MARCO hard negatives with distillation",
+            model_name=f"models/{run_name}",
         ),
-        trust_remote_code=True,
     )
+    model.max_active_dims = 200
     model.max_seq_length = 256  # Set the max sequence length to 256 for the training
     # model.tokenizer.do_lower_case = True  # Set to True if the model is lowercase
     # model.tokenizer.add_prefix_space = True  # Add prefix space for models like RoBERTa
     logging.info("Model max length: %s", model.max_seq_length)
 
     # 2. Load the MS MARCO dataset: https://huggingface.co/datasets/sentence-transformers/msmarco
+    train_dataset = {}
+    eval_dataset = {}
 
-    # train_dataset_path = "datasets/ms-marco-train-hard-negatives-1"
-    # eval_dataset_path = "datasets/ms-marco-eval-hard-negatives-1"
-    # train_dataset = load_from_disk(train_dataset_path)
-    # eval_dataset = load_from_disk(eval_dataset_path)
-    datasets = load_from_disk(dataset_name)
-    eval_dataset = datasets["eval"]
-    train_dataset = datasets["train"]
+    for lang in LANGS:
+        subset_path = os.path.join(dataset_name, lang)
+        subset = load_from_disk(subset_path)
+        train_dataset[lang] = subset["train"]
+        eval_dataset[lang] = subset["eval"]
 
     logging.info(train_dataset)
+    logging.info(eval_dataset)
     # 3. Define our training loss
     loss = losses.SpladeLoss(
         model,
@@ -86,10 +93,13 @@ def main():
         document_regularizer_weight=document_regularizer_weight,
     )
 
-    evaluator = evaluation.SparseNanoBEIREvaluator(batch_size=train_batch_size)
-
+    nano_evaluator = evaluation.SparseNanoBEIREvaluator(batch_size=train_batch_size)
+    multilingual_evaluator = evaluation.SparseMtebEvaluator(batch_size=train_batch_size)
+    evaluator = SequentialEvaluator(
+        evaluators=[nano_evaluator, multilingual_evaluator],
+        main_score_function=lambda score: score[-1],
+    )
     # 5. Define the training arguments
-    run_name = f"splade-{short_model_name}-{dataset_name.split('/')[-1]}-bs_{train_batch_size * n_gpu}-lr_{learning_rate}-lq_{query_regularizer_weight}-ld_{document_regularizer_weight}"
     args = SparseEncoderTrainingArguments(
         # Required parameter:
         output_dir=f"models/{run_name}",
@@ -100,12 +110,15 @@ def main():
         learning_rate=learning_rate,
         warmup_ratio=0.05,
         load_best_model_at_end=True,
-        metric_for_best_model="eval_NanoBEIR_mean_dot_ndcg@10",
+        metric_for_best_model="eval_SparseMTEB_global_average",
         fp16=False,  # Set to False if you get an error that your GPU can't run on FP16
         bf16=True,  # Set to True if you have a GPU that supports BF16
+        multi_dataset_batch_sampler=MultiDatasetBatchSamplers.PROPORTIONAL,
         # Optional tracking/debugging parameters:
-        eval_strategy="epoch",
-        save_strategy="epoch",
+        eval_strategy="steps",
+        save_strategy="steps",
+        eval_steps=10,
+        save_steps=10,
         save_total_limit=5,
         logging_steps=200,
         run_name=run_name,  # Will be used in W&B if `wandb` is installed

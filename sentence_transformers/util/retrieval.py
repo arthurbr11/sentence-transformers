@@ -206,7 +206,7 @@ def semantic_search(
 
     queries_result_list = [[] for _ in range(len(query_embeddings))]
 
-    for query_start_idx in range(0, len(query_embeddings), query_chunk_size):
+    for query_start_idx in tqdm(range(0, len(query_embeddings), query_chunk_size)):
         query_end_idx = min(query_start_idx + query_chunk_size, len(query_embeddings))
         if query_embeddings.is_sparse:
             indices = torch.arange(query_start_idx, query_end_idx, device=query_embeddings.device)

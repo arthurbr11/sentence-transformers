@@ -15,6 +15,9 @@ from sentence_transformers.sparse_encoder.evaluation.SparseInformationRetrievalE
 from sentence_transformers.sparse_encoder.evaluation.SparseMSEEvaluator import (
     SparseMSEEvaluator,
 )
+from sentence_transformers.sparse_encoder.evaluation.SparseMtebEvaluator import (
+    SparseMtebEvaluator,
+)
 from sentence_transformers.sparse_encoder.evaluation.SparseNanoBEIREvaluator import (
     SparseNanoBEIREvaluator,
 )
@@ -38,4 +41,5 @@ __all__ = [
     "SparseTranslationEvaluator",
     "SparseRerankingEvaluator",
     "ReciprocalRankFusionEvaluator",
+    "SparseMtebEvaluator",
 ]

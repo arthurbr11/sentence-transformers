@@ -9,7 +9,7 @@ import torch
 from datasets import DatasetDict, load_dataset, load_from_disk
 from huggingface_hub import hf_hub_download
 
-from sentence_transformers import CrossEncoder
+from sentence_transformers import CrossEncoder, SentenceTransformer, mine_hard_negatives
 
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
 random.seed(12)
@@ -274,5 +274,104 @@ def rescore_nomic():
         print(f"Saved rescored split to: {output_path}")
 
 
+def mine_swim_ir():
+    lang = ["fr", "es"]  # "en", "de",
+    for language in lang:
+        torch.cuda.empty_cache()
+        dataset = load_dataset("nthakur/swim-ir-monolingual", language, split="train")
+        dataset = dataset.remove_columns(["_id", "lang", "code", "title"])
+        dataset = dataset.rename_column("text", "positive")
+        print(f"Dataset {language} loaded with {len(dataset)} samples.")
+        # go through the dataset and drop the row that havent ? at the end of the query
+        dataset = dataset.filter(lambda x: x["query"].endswith("?"))
+        print(f"Dataset {language} filtered to {len(dataset)} samples with queries ending with '?'.")
+        print(f"Dataset format: {dataset[0]}")
+        dataset = mine_hard_negatives(
+            dataset=dataset,
+            model=SentenceTransformer("Qwen/Qwen3-Embedding-0.6B"),
+            range_max=50,  # Consider 50 negatives of which you'll randomly sample `num_negatives`
+            num_negatives=4,  # 10 or less is recommended
+            sampling_strategy="random",  # "random" means that we sample randomly across the top candidates
+            output_format="n-tuple-scores",  # this format gives query, positive, negative_1, ..., negative_n, score. The score will be from the dense model
+            batch_size=96,  # Adjust as needed
+            use_faiss=False,  # Optional: Use faiss/faiss-gpu for faster similarity search
+        )
+        dataset = dataset.rename_column("score", "label")
+        split_dataset = dataset.train_test_split(test_size=0.005, seed=42)
+        final_dataset = DatasetDict(
+            {
+                "train": split_dataset["train"],
+                "eval": split_dataset["test"],
+            }
+        )
+
+        os.makedirs(f"datasets/swim-ir-monolingual/{language}", exist_ok=True)
+        final_dataset.save_to_disk(f"datasets/swim-ir-monolingual/{language}")
+
+
+def rescore_swim_ir():
+    input_dataset_dir = "datasets/swim-ir-monolingual"
+    output_dataset_dir = "datasets/swim-ir-monolingual-Qwen3-8B-scores-4"
+    os.makedirs(output_dataset_dir, exist_ok=True)
+
+    # Load CrossEncoder model
+    cross_encoder = CrossEncoder(
+        "tomaarsen/Qwen3-Reranker-8B-seq-cls",  # "cross-encoder/ms-marco-MiniLM-L6-v2",  #
+        model_kwargs={"torch_dtype": torch.float16, "device_map": "auto"},
+        activation_fn=torch.nn.Identity(),
+    )
+
+    def rerank(batch):
+        queries = batch["query"]
+        all_scores = []
+
+        for key in ["positive", "negative_1", "negative_2", "negative_3", "negative_4"]:
+            passages = batch[key]
+            pairs = list(zip(queries, passages))
+            scores = cross_encoder.predict(
+                pairs,
+                convert_to_tensor=True,
+                batch_size=4,
+                show_progress_bar=False,
+            )
+            all_scores.append(scores)
+
+        all_scores = torch.stack(all_scores, dim=1)
+        batch["label"] = all_scores.tolist()
+        return batch
+
+    lang = ["es"]  # "en", "de", "fr",
+    for language in lang:
+        print(f"Processing split: {language}")
+        subset_path = os.path.join(input_dataset_dir, language)
+        subset = DatasetDict.load_from_disk(subset_path)
+
+        train_dataset = subset["train"].map(rerank, batched=True, batch_size=1024)
+        eval_dataset = subset["eval"].map(rerank, batched=True, batch_size=1024)
+
+        rescored_subset = DatasetDict(
+            {
+                "train": train_dataset,
+                "eval": eval_dataset,
+            }
+        )
+
+        output_path = os.path.join(output_dataset_dir, language)
+        rescored_subset.save_to_disk(output_path)
+        print(f"Saved rescored split to: {output_path}")
+
+
 if __name__ == "__main__":
-    rescore_nomic()
+    # mine_swim_ir()
+    rescore_swim_ir()
+    # input_dataset_dir = "datasets/swim-ir-monolingual"
+
+    # lang = ["en", "de", "fr", "es"]
+    # for language in lang:
+    #     print(f"Loading dataset for language: {language}")
+    #     subset_path = os.path.join(input_dataset_dir, language)
+    #     subset = DatasetDict.load_from_disk(subset_path)
+    #     train_dataset = subset["train"]
+    #     eval_dataset = subset["eval"]
+    #     print(f"Train dataset size for {language}: {len(train_dataset)}")
+    #     print(f"Eval dataset size for {language}: {len(eval_dataset)}")

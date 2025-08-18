@@ -58,11 +58,18 @@ class MlmTrainer(Trainer):
 
 class MergeAndRoundLogsCallback(TrainerCallback):
     def __init__(self, trainer: MlmTrainer, ndigits: int = 5) -> None:
-        super().__init__()
         self.trainer = trainer
         self.ndigits = ndigits
-        self._last_logged_step: int | None = None
+        self.ce_accum, self.flops_accum, self.count = 0.0, 0.0, 0
+
+    def on_step_end(self, args, state, control, **kwargs):
+        self.ce_accum += self.trainer._last_ce
+        self.flops_accum += self.trainer._last_flops
+        self.count += 1
 
     def on_log(self, args, state, control, logs=None, **kwargs):
-        logs["loss/ce"] = round(self.trainer._last_ce, self.ndigits)
-        logs["loss/flops"] = round(self.trainer._last_flops, self.ndigits)
+        if self.count > 0:
+            logs["loss/ce"] = round(self.ce_accum / self.count, self.ndigits)
+            logs["loss/flops"] = round(self.flops_accum / self.count, self.ndigits)
+            self.ce_accum = self.flops_accum = 0.0
+            self.count = 0

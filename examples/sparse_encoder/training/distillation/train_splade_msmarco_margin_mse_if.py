@@ -18,7 +18,9 @@ from sentence_transformers import (
     SparseEncoderTrainer,
     SparseEncoderTrainingArguments,
 )
+from sentence_transformers.models import Router
 from sentence_transformers.sparse_encoder import evaluation, losses
+from sentence_transformers.sparse_encoder.models import MLMTransformer, SparseStaticEmbedding, SpladePooling
 
 # Set the log level to INFO to get more information
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
@@ -30,7 +32,6 @@ def main():
     parser.add_argument("--n_gpu", type=int, default=4, help="Number of GPUs to use.")
     parser.add_argument("--train_batch_size", type=int, default=32, help="Training batch size per device.")
     parser.add_argument("--num_epochs", type=int, default=35, help="Number of training epochs.")
-    parser.add_argument("--query_regularizer_weight", type=float, default=0.002, help="Query regularizer weight.")
     parser.add_argument("--document_regularizer_weight", type=float, default=0.04, help="Document regularizer weight.")
     parser.add_argument("--learning_rate", type=float, default=2e-5, help="Learning rate for training.")
     parser.add_argument(
@@ -47,18 +48,27 @@ def main():
     n_gpu = args.n_gpu
     train_batch_size = args.train_batch_size
     num_epochs = args.num_epochs
-    query_regularizer_weight = args.query_regularizer_weight
     document_regularizer_weight = args.document_regularizer_weight
     learning_rate = args.learning_rate
     dataset_name = args.dataset_name
 
     # 1. Define our SparseEncoder model
+    model_name = "FacebookAI/xlm-roberta-large"
+    mlm_transformer = MLMTransformer(model_name)
+    splade_pooling = SpladePooling(
+        pooling_strategy="max", word_embedding_dimension=mlm_transformer.get_sentence_embedding_dimension()
+    )
+    router = Router.for_query_document(
+        query_modules=[SparseStaticEmbedding(tokenizer=mlm_transformer.tokenizer, frozen=False)],
+        document_modules=[mlm_transformer, splade_pooling],
+    )
+
     model = SparseEncoder(
-        model_name,
+        modules=[router],
         model_card_data=SparseEncoderModelCardData(
             language="en",
             license="apache-2.0",
-            model_name=f"splade-{short_model_name} trained on MS MARCO hard negatives with distillation",
+            model_name=f"Inference-free splade-{short_model_name} trained on MS MARCO hard negatives with distillation",
         ),
         trust_remote_code=True,
     )
@@ -82,14 +92,14 @@ def main():
     loss = losses.SpladeLoss(
         model,
         losses.SparseMarginMSELoss(model),
-        query_regularizer_weight=query_regularizer_weight,
+        query_regularizer_weight=0,
         document_regularizer_weight=document_regularizer_weight,
     )
 
     evaluator = evaluation.SparseNanoBEIREvaluator(batch_size=train_batch_size)
 
     # 5. Define the training arguments
-    run_name = f"splade-{short_model_name}-{dataset_name.split('/')[-1]}-bs_{train_batch_size * n_gpu}-lr_{learning_rate}-lq_{query_regularizer_weight}-ld_{document_regularizer_weight}"
+    run_name = f"splade-IF-{short_model_name}-{dataset_name.split('/')[-1]}-bs_{train_batch_size * n_gpu}-lr_{learning_rate}-ld_{document_regularizer_weight}"
     args = SparseEncoderTrainingArguments(
         # Required parameter:
         output_dir=f"models/{run_name}",
@@ -101,6 +111,7 @@ def main():
         warmup_ratio=0.05,
         load_best_model_at_end=True,
         metric_for_best_model="eval_NanoBEIR_mean_dot_ndcg@10",
+        learning_rate_mapping={r"SparseStaticEmbedding\.weight": 1e-3},
         fp16=False,  # Set to False if you get an error that your GPU can't run on FP16
         bf16=True,  # Set to True if you have a GPU that supports BF16
         # Optional tracking/debugging parameters:

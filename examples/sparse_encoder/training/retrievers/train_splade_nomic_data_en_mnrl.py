@@ -43,6 +43,7 @@ def main():
         default="datasets/nomic-4",
         help="Dataset name.",
     )
+    parser.add_argument("--all_gather", type=str, default="False", help="Whether to use all_gather.")
 
     args = parser.parse_args()
     model_name = args.model_name
@@ -87,9 +88,10 @@ def main():
     logging.info(eval_dataset)
 
     # 3. Define our training loss
+    all_gather = args.all_gather.lower() == "true"
     loss = losses.SpladeLoss(
         model,
-        losses.SparseMultipleNegativesRankingLoss(model),
+        losses.SparseMultipleNegativesRankingLoss(model, gather_across_devices=all_gather),
         query_regularizer_weight=query_regularizer_weight,
         document_regularizer_weight=document_regularizer_weight,
     )
