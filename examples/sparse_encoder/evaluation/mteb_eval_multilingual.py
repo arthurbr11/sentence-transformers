@@ -237,6 +237,7 @@ def run_multilingual_evaluation(model_name, context_length=256, output_base_dir=
     """Run evaluation for all languages and calculate averages"""
     # Load the model
     model = SentenceTransformer(model_name, trust_remote_code=True)
+    model.max_seq_length = context_length
     # model.max_seq_length = context_length
     model.model_card_data.model_name = model_name
 
@@ -267,15 +268,17 @@ already_evaluated = [
 ]
 
 custom_models = [
-    # Add more models here
+    "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1",
 ]
 
-model_to_eval = ["sentence-transformers/all-MiniLM-L6-v2"]
+model_to_eval = [
+    # "models/splade-bert-base-multilingual-uncased-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-68000"
+]
 
 # Main evaluation loop
 if __name__ == "__main__":
     for model_name in tqdm(model_to_eval + custom_models):
-        for context_length in [256]:  # Can add more context lengths like [256, 512]
+        for context_length in [512]:  # Can add more context lengths like [256, 512]
             print(f"\n{'=' * 60}")
             print(f"Evaluating model: {model_name}")
             print(f"Context length: {context_length}")

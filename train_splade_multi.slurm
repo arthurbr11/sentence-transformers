@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=train_splade_marginmse
+#SBATCH --job-name=train_splade_multi
 #SBATCH --partition=hopper-prod
 #SBATCH --nodes=1
 #SBATCH --ntasks=2
@@ -10,25 +10,25 @@
 #SBATCH --qos=normal
 #SBATCH --exclusive
 #SBATCH --requeue
-#SBATCH --output=/fsx/arthur_bresnu/projects/sentence-transformers/logs/train_splade/%A_%a.out
+#SBATCH --output=/fsx/arthur_bresnu/projects/sentence-transformers/logs/train_splade_multi/%A_%a.out
 
 # Define scripts and GPU assignments
 SCRIPTS=(
-    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse.py"
-    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse.py"
+    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse_multi.py"
+    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse_multi.py"    
 )
 
 # Define constants for training parameters
 MODEL_NAMES=(
-"outputs/mlm_train_ettin-encoder-150m_gbs1024_lr8e-4_unfrozen_lambda1e-3"    "outputs/mlm_train_ettin-encoder-150m_gbs1024_lr8e-4_unfrozen_lambda1e-3"
+"google-bert/bert-base-multilingual-uncased"    "google-bert/bert-base-multilingual-uncased"
 )
 N_GPUS=(4 4)
 TRAIN_BATCH_SIZES=(32 32)
-NUM_EPOCHS=(37 37)
-QUERY_REGULARIZER_WEIGHTS=(0.1 0.05)
-DOCUMENT_REGULARIZER_WEIGHTS=(0.08 0.04)
+NUM_EPOCHS=(5 5)
+QUERY_REGULARIZER_WEIGHTS=(0.3 0.1)
+DOCUMENT_REGULARIZER_WEIGHTS=(0.25 0.1)
 LEARNING_RATES=(8e-5 8e-5)
-DATASET_NAMES=("datasets/msmarco-Qwen3-8B-scores-4" "datasets/msmarco-Qwen3-8B-scores-4")
+DATASET_NAMES=("datasets/swim-ir-monolingual-Qwen3-8B-scores-4" "datasets/swim-ir-monolingual-Qwen3-8B-scores-4")
 
 cd /fsx/arthur_bresnu/projects/sentence-transformers
 source .venv/bin/activate
@@ -68,7 +68,7 @@ for ((TASK_ID=0; TASK_ID<${#SCRIPTS[@]}; TASK_ID++)); do
         --query_regularizer_weight $QUERY_REGULARIZER_WEIGHT \
         --document_regularizer_weight $DOCUMENT_REGULARIZER_WEIGHT \
         --learning_rate $LEARNING_RATE \
-        --dataset_name $DATASET_NAME > /fsx/arthur_bresnu/projects/sentence-transformers/logs/train_splade/${SLURM_JOB_ID}_${TASK_ID}.out 2>&1 &
+        --dataset_name $DATASET_NAME > /fsx/arthur_bresnu/projects/sentence-transformers/logs/train_splade_multi/${SLURM_JOB_ID}_${TASK_ID}.out 2>&1 &
 
 done
 

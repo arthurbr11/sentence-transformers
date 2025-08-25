@@ -17,7 +17,7 @@ source .venv/bin/activate
 uv pip install .
 
 # Global variables for all script arguments
-MODEL="sparse-encoder/trans-ettin-encoder-150m-uncased-en-en"
+MODEL="google-bert/bert-base-multilingual-uncased"
 HF_DATASET="sentence-transformers/msmarco-corpus"
 HF_SUBSET="passage"
 HF_SPLIT="train"
@@ -26,7 +26,7 @@ MAX_LENGTH=256
 MLM_PROBABILITY=0.3
 EPOCHS=1
 BATCH_SIZE=128
-LEARNING_RATE=8e-4
+LEARNING_RATE=8e-5
 WARMUP_RATIO=0.0
 WEIGHT_DECAY=1e-5
 SEED=42
@@ -46,9 +46,9 @@ MODEL_NAME=$(basename "$MODEL")
 FREEZE_STR=$([ "$FREEZE" = true ] && echo "frozen" || echo "unfrozen")
 
 # Dynamic naming based on your requirements
-OUTPUT_DIR="outputs/mlm_train_${MODEL_NAME}_gbs${GLOBAL_BATCH_SIZE}_lr${LEARNING_RATE}_${FREEZE_STR}"
-WANDB_PROJECT="mlm-train"
-WANDB_RUN_NAME="mlm_train_${MODEL_NAME}_gbs${GLOBAL_BATCH_SIZE}_lr${LEARNING_RATE}_${FREEZE_STR}"
+OUTPUT_DIR="outputs/mlm_train_${MODEL_NAME}_gbs${GLOBAL_BATCH_SIZE}_lr${LEARNING_RATE}_${FREEZE_STR}_lambda${LAMBDA_FLOPS}"
+WANDB_PROJECT="mlm-flops"
+WANDB_RUN_NAME="mlm_train_${MODEL_NAME}_gbs${GLOBAL_BATCH_SIZE}_lr${LEARNING_RATE}_${FREEZE_STR}_lambda${LAMBDA_FLOPS}"
 
 echo "MLM Training starting at $(date)"
 echo "Job ID: $SLURM_JOB_ID"
@@ -70,6 +70,9 @@ BF16_ARG=""
 if [ "$BF16" = true ]; then
     BF16_ARG="--bf16"
 fi
+
+# --multilingual_datasets "datasets/swim-ir-pretrained/de" "datasets/swim-ir-pretrained/en" "datasets/swim-ir-pretrained/fr" "datasets/swim-ir-pretrained/es" 
+# --multilingual_datasets "unicamp-dl/mmarco/english" "unicamp-dl/mmarco/french" "unicamp-dl/mmarco/german" "unicamp-dl/mmarco/spanish"
 
 # Run the MLM training script
 accelerate launch --num_processes $NUM_GPUS  mlm/train.py \
@@ -94,6 +97,8 @@ accelerate launch --num_processes $NUM_GPUS  mlm/train.py \
     --wandb_run_name "$WANDB_RUN_NAME" \
     --logging_steps $LOGGING_STEPS \
     --save_steps $SAVE_STEPS \
-    $FREEZE_ARG
+    $FREEZE_ARG \
+    --multilingual_datasets "datasets/swim-ir-pretrained/de" "datasets/swim-ir-pretrained/en" "datasets/swim-ir-pretrained/fr" "datasets/swim-ir-pretrained/es" 
+
 
 echo "MLM Training completed at $(date)"

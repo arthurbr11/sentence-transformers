@@ -85,10 +85,10 @@ def main():
     parser = argparse.ArgumentParser(description="Merge multiple sentence-transformer checkpoints using mergekit")
     parser.add_argument(
         "--base_dir",
-        default="models/splade-co-condenser-marco-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1",
+        default="models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-58350",
         help="Directory containing checkpoint folders",
     )
-    parser.add_argument("--output_dir", default="merged_model", help="Output directory for the merged model")
+    parser.add_argument("--output_dir", default="merged_model-3", help="Output directory for the merged model")
     parser.add_argument("--config_dir", default="temp_config", help="Directory to store the mergekit configuration")
 
     args = parser.parse_args()
@@ -96,9 +96,8 @@ def main():
     print(f"Scanning for checkpoints in {args.base_dir}...")
     # checkpoints = list_checkpoints(args.base_dir)
     checkpoints = [
-        "models/splade-co-condenser-marco-nomic-4-bs_512-lr_2e-05-lq_0.0008-ld_0.002/checkpoint-19190",
-        "models/splade-co-condenser-marco-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.3/checkpoint-46680",
-        "models/splade-co-condenser-marco-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-70020",
+        "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.3-ld_0.25/checkpoint-77800",
+        "models/splade-ettin-encoder-150m-msmarco-cross-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-89470",
     ]
 
     if not checkpoints:

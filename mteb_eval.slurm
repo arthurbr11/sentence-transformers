@@ -16,4 +16,4 @@ source .venv/bin/activate
 uv pip install .
 
 # Run the evaluation script
-python examples/sparse_encoder/evaluation/mteb_eval_multilingual.py
+python examples/sparse_encoder/evaluation/mteb_eval.py

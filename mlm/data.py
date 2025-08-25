@@ -83,14 +83,17 @@ class MultilingualDataset(Dataset):
             try:
                 # Try to load as HF dataset directory
                 if os.path.isdir(dataset_path):
-                    hf_dataset = load_from_disk(dataset_path)["train"]
+                    hf_dataset = load_from_disk(dataset_path)
                     lang_name = os.path.basename(dataset_path)
                 else:
                     # Assume it's a dataset name/path
                     from datasets import load_dataset
 
-                    hf_dataset = load_dataset(dataset_path, split="train")
                     lang_name = dataset_path.split("/")[-1]
+
+                    hf_dataset = load_dataset("/".join(dataset_path.split("/")[:-1]), f"collection-{lang_name}")[
+                        "collection"
+                    ]
 
                 # Limit samples per language if specified
                 if max_samples_per_lang and len(hf_dataset) > max_samples_per_lang:

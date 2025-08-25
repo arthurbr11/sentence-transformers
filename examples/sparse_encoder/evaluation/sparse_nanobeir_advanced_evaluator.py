@@ -18,6 +18,7 @@ model_to_eval = [
     # "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill",
     # "opensearch-project/opensearch-neural-sparse-encoding-doc-v2-distill",
     # "opensearch-project/opensearch-neural-sparse-encoding-v2-distill",
+    # "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1"
 ]
 
 # Add custom models
@@ -27,13 +28,16 @@ custom_models = [
     #     "models/splade-co-condenser-marco-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.3/checkpoint-46680",
     #     "models/merged_model-1",
     #     "models/merged_model-2",
-    "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-58350",
-    "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-85580",
+    # "merged_model-3",
+    # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.3-ld_0.25/checkpoint-77800",
+    # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-58350",
+    # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-85580",
+    "models/splade-bert-base-multilingual-uncased-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-68000"
 ]
 
 for model_name in tqdm(model_to_eval + custom_models):
     for context_length in [256, 512]:
-        path = f"results/{model_name.replace('/', '__')}_trunc_d256_q128/NanoBEIR_{context_length}"
+        path = f"results/{model_name.replace('/', '__')}/NanoBEIR_{context_length}"
         if os.path.exists(path):
             print(f"Results already exist for {model_name} with context length {context_length}. Skipping...")
             continue
@@ -45,7 +49,6 @@ for model_name in tqdm(model_to_eval + custom_models):
             dataset_names=None,  # None means evaluate on all datasets
             show_progress_bar=True,
             batch_size=32,
-            max_active_dims=256,
         )
 
         os.makedirs(path, exist_ok=True)

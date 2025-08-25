@@ -138,26 +138,29 @@ already_evaluated = [
     # "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-distill",
     # "opensearch-project/opensearch-neural-sparse-encoding-doc-v2-distill",
     # "opensearch-project/opensearch-neural-sparse-encoding-v2-distill",
-    #
-    #     "models/merged_model-2",
-    #   "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.3-ld_0.25/checkpoint-77800",
-    #   "models/splade-gte-en-mlm-base-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-108920",
+    # "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1",
+    # "models/merged_model-2",
+    # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.3-ld_0.25/checkpoint-77800",
+    # "models/splade-gte-en-mlm-base-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-108920",
     # "models/splade-co-condenser-marco-msmarco-cross_scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.08/checkpoint-105030",
     # "models/splade-co-condenser-marco-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-70020",
     # "models/splade-co-condenser-marco-msmarco-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.3/checkpoint-46680",
     # "models/merged_model-1",
     # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-58350",
     # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-85580",
+    # "models/merged_model-3",
 ]
-model_to_eval = []
+model_to_eval = [
+    "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1",
+]
 
 # Add custom models
 custom_models = [
-    "models/splade-ettin-encoder-400m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-66130",
+    # "models/splade-bert-base-multilingual-uncased-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-68000"
 ]
 
 for model_name in tqdm(model_to_eval + custom_models):
-    for context_length in [256]:  # , 512]:
+    for context_length in [512]:  # , 512]:
         # Load a model
         model = SparseEncoder(model_name, trust_remote_code=True)
         model.max_seq_length = context_length  # Set the max sequence length for the evaluation

@@ -122,6 +122,8 @@ def main():
 
     # Choose data source: multilingual datasets, HF dataset, or local text file
     if args.multilingual_datasets is not None:
+        args.multilingual_datasets = [d for d in args.multilingual_datasets if d != " "]
+        print(args.multilingual_datasets)
         # Use MultilingualDataset for training on multiple languages
         dataset = MultilingualDataset(
             dataset_paths=args.multilingual_datasets,

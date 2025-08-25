@@ -26,7 +26,7 @@ from sentence_transformers.training_args import MultiDatasetBatchSamplers
 # Set the log level to INFO to get more information
 logging.basicConfig(format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO)
 
-LANGS = ["en", "de"]  # , "es", "fr"]
+LANGS = ["en", "de", "es", "fr"]
 
 
 def main():
@@ -46,6 +46,7 @@ def main():
         default="datasets/swim-ir-monolingual-Qwen3-8B-scores-4",
         help="Dataset name.",
     )
+    os.environ.setdefault("WANDB_PROJECT", "splade-multi-training")
 
     args = parser.parse_args()
     model_name = args.model_name
@@ -66,8 +67,8 @@ def main():
         model_card_data=SparseEncoderModelCardData(
             model_name=f"models/{run_name}",
         ),
+        trust_remote_code=True,  # Set to True if you want to use custom code from the model repository
     )
-    model.max_active_dims = 200
     model.max_seq_length = 256  # Set the max sequence length to 256 for the training
     # model.tokenizer.do_lower_case = True  # Set to True if the model is lowercase
     # model.tokenizer.add_prefix_space = True  # Add prefix space for models like RoBERTa
@@ -117,8 +118,8 @@ def main():
         # Optional tracking/debugging parameters:
         eval_strategy="steps",
         save_strategy="steps",
-        eval_steps=10,
-        save_steps=10,
+        eval_steps=6800,  # approx. 2 times per epoch
+        save_steps=6800,
         save_total_limit=5,
         logging_steps=200,
         run_name=run_name,  # Will be used in W&B if `wandb` is installed
