@@ -47,6 +47,9 @@ def main():
         help="Dataset name.",
     )
     os.environ.setdefault("WANDB_PROJECT", "splade-multi-training")
+    parser.add_argument(
+        "--resume_from_checkpoint", type=str, default=None, help="Path to checkpoint directory to resume from."
+    )
 
     args = parser.parse_args()
     model_name = args.model_name
@@ -135,7 +138,11 @@ def main():
         loss=loss,
         evaluator=evaluator,
     )
-    trainer.train()
+    if args.resume_from_checkpoint is not None:
+        logging.info(f"Resuming training from checkpoint: {args.resume_from_checkpoint}")
+        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    else:
+        trainer.train()
 
     # 7. Evaluate the final model, using the complete NanoBEIR dataset
     evaluator(model)

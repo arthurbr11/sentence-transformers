@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=12
 #SBATCH --mem-per-cpu=6G
 #SBATCH --gres=gpu:8                 # Request 8 GPUs
-#SBATCH --time=24:00:00
-#SBATCH --qos=normal
+#SBATCH --time=8:00:00
+#SBATCH --qos=high
 #SBATCH --exclusive
 #SBATCH --requeue
 #SBATCH --output=/fsx/arthur_bresnu/projects/sentence-transformers/logs/train_splade_multi/%A_%a.out
@@ -15,20 +15,19 @@
 # Define scripts and GPU assignments
 SCRIPTS=(
     "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse_multi.py"
-    "examples/sparse_encoder/training/distillation/train_splade_msmarco_margin_mse_multi.py"    
 )
 
 # Define constants for training parameters
 MODEL_NAMES=(
-"google-bert/bert-base-multilingual-uncased"    "google-bert/bert-base-multilingual-uncased"
+"outputs/mlm_train_EuroBERT-210m_gbs512_lr8e-5_unfrozen_lambda1e-3"
 )
-N_GPUS=(4 4)
-TRAIN_BATCH_SIZES=(32 32)
-NUM_EPOCHS=(5 5)
-QUERY_REGULARIZER_WEIGHTS=(0.3 0.1)
-DOCUMENT_REGULARIZER_WEIGHTS=(0.25 0.1)
-LEARNING_RATES=(8e-5 8e-5)
-DATASET_NAMES=("datasets/swim-ir-monolingual-Qwen3-8B-scores-4" "datasets/swim-ir-monolingual-Qwen3-8B-scores-4")
+N_GPUS=(8)
+TRAIN_BATCH_SIZES=(16)
+NUM_EPOCHS=(5)
+QUERY_REGULARIZER_WEIGHTS=(0.3)
+DOCUMENT_REGULARIZER_WEIGHTS=(0.25)
+LEARNING_RATES=(2e-5)
+DATASET_NAMES=("datasets/swim-ir-monolingual-Qwen3-8B-scores-4")
 
 cd /fsx/arthur_bresnu/projects/sentence-transformers
 source .venv/bin/activate
@@ -48,8 +47,8 @@ for ((TASK_ID=0; TASK_ID<${#SCRIPTS[@]}; TASK_ID++)); do
     DATASET_NAME=${DATASET_NAMES[$TASK_ID]}
 
     # Calculate the GPU indices for this task
-    GPU_START=$((TASK_ID * 4))
-    GPU_END=$((GPU_START + 3))
+    GPU_START=$((TASK_ID * 8))
+    GPU_END=$((GPU_START + 7))
     export CUDA_VISIBLE_DEVICES=$(seq -s, $GPU_START $GPU_END)
 
     echo "Task $TASK_ID starting at $(date)"
@@ -68,6 +67,7 @@ for ((TASK_ID=0; TASK_ID<${#SCRIPTS[@]}; TASK_ID++)); do
         --query_regularizer_weight $QUERY_REGULARIZER_WEIGHT \
         --document_regularizer_weight $DOCUMENT_REGULARIZER_WEIGHT \
         --learning_rate $LEARNING_RATE \
+        --resume_from_checkpoint "models/splade-mlm_train_EuroBERT-210m_gbs512_lr8e-5_unfrozen_lambda1e-3-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.3-ld_0.25/checkpoint-47600" \
         --dataset_name $DATASET_NAME > /fsx/arthur_bresnu/projects/sentence-transformers/logs/train_splade_multi/${SLURM_JOB_ID}_${TASK_ID}.out 2>&1 &
 
 done

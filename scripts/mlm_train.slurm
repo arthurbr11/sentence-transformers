@@ -17,7 +17,7 @@ source .venv/bin/activate
 uv pip install .
 
 # Global variables for all script arguments
-MODEL="google-bert/bert-base-multilingual-uncased"
+MODEL="EuroBERT/EuroBERT-210m"
 HF_DATASET="sentence-transformers/msmarco-corpus"
 HF_SUBSET="passage"
 HF_SPLIT="train"
@@ -25,7 +25,7 @@ HF_TEXT_FIELD="text"
 MAX_LENGTH=256
 MLM_PROBABILITY=0.3
 EPOCHS=1
-BATCH_SIZE=128
+BATCH_SIZE=64
 LEARNING_RATE=8e-5
 WARMUP_RATIO=0.0
 WEIGHT_DECAY=1e-5
