@@ -1,13 +1,17 @@
+import argparse
 import json
+import logging
 import os
 from collections import defaultdict
 
 from mteb import MTEB
 from mteb.benchmarks.benchmark import Benchmark
 from mteb.overview import MTEBTasks, get_tasks
-from tqdm import tqdm
 
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SparseEncoder
+
+logging.basicConfig(format="%(message)s", level=logging.INFO)
+
 
 # Define language-specific benchmarks
 MTEB_FRA_RETRIEVAL_TASKS = Benchmark(
@@ -233,12 +237,13 @@ def calculate_language_averages(language_code, output_dir="results"):
     print(f"Main score: {averaged_metrics['main_score']:.4f}")
 
 
-def run_multilingual_evaluation(model_name, context_length=256, output_base_dir="results"):
+def run_multilingual_evaluation(model_name, context_length=256, output_base_dir="results", crop=False):
     """Run evaluation for all languages and calculate averages"""
     # Load the model
-    model = SentenceTransformer(model_name, trust_remote_code=True)
+    model = SparseEncoder(model_name, trust_remote_code=True)
     model.max_seq_length = context_length
-    # model.max_seq_length = context_length
+    if crop:
+        model.max_active_dims = 200
     model.model_card_data.model_name = model_name
 
     # Run evaluations for each language
@@ -262,30 +267,32 @@ def run_multilingual_evaluation(model_name, context_length=256, output_base_dir=
         calculate_language_averages(language_code, model_output_dir)
 
 
-# Models to evaluate
-already_evaluated = [
-    # Add models that have already been evaluated to skip them
-]
+# # Models to evaluate
+# already_evaluated = [
+#     # Add models that have already been evaluated to skip them
+# ]
 
-custom_models = [
-    "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1",
-]
+# custom_models = [
+#     "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1",
+# ]
 
-model_to_eval = [
-    # "models/splade-bert-base-multilingual-uncased-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-68000"
-]
+# model_to_eval = [
+#     # "models/splade-bert-base-multilingual-uncased-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-68000"
+# ]
 
 # Main evaluation loop
 if __name__ == "__main__":
-    for model_name in tqdm(model_to_eval + custom_models):
-        for context_length in [512]:  # Can add more context lengths like [256, 512]
-            print(f"\n{'=' * 60}")
-            print(f"Evaluating model: {model_name}")
-            print(f"Context length: {context_length}")
-            print(f"{'=' * 60}")
-
-            run_multilingual_evaluation(model_name, context_length)
-
-    print("\n" + "=" * 60)
-    print("Multilingual evaluation completed!")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description="Train a Sparse Encoder model for Information Retrieval.")
+    parser.add_argument(
+        "--model_name", type=str, default="google-bert/bert-base-multilingual-uncased", help="Model name."
+    )
+    parser.add_argument(
+        "--crop",
+        action="store_true",
+        help="Whether to crop the model (freeze layers except last transformer and pooler).",
+    )
+    args = parser.parse_args()
+    model_name = args.model_name
+    logging.info(f"Evaluating model: {model_name}")
+    logging.info(f"Crop: {args.crop}")
+    run_multilingual_evaluation(model_name, context_length=256, output_base_dir="results", crop=args.crop)

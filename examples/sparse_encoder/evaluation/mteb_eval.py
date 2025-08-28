@@ -1,4 +1,6 @@
+import argparse
 import json
+import logging
 import os
 from collections import defaultdict
 
@@ -8,6 +10,8 @@ from mteb.overview import MTEBTasks, get_tasks
 from tqdm import tqdm
 
 from sentence_transformers import SparseEncoder
+
+logging.basicConfig(format="%(message)s", level=logging.INFO)
 
 MTEB_EN_V2_RETRIEVAL_TASKS = Benchmark(
     name="MTEB_RETRIEVAL(eng, v2)",
@@ -151,7 +155,7 @@ already_evaluated = [
     # "models/merged_model-3",
 ]
 model_to_eval = [
-    "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1",
+    # "opensearch-project/opensearch-neural-sparse-encoding-multilingual-v1",
 ]
 
 # Add custom models
@@ -159,20 +163,41 @@ custom_models = [
     # "models/splade-bert-base-multilingual-uncased-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-68000"
 ]
 
-for model_name in tqdm(model_to_eval + custom_models):
-    for context_length in [512]:  # , 512]:
-        # Load a model
-        model = SparseEncoder(model_name, trust_remote_code=True)
-        model.max_seq_length = context_length  # Set the max sequence length for the evaluation
-        model.model_card_data.model_name = model_name
-        # Create MTEB evaluation with device specification
-        evaluation = MTEB(tasks=MTEB_EN_V2_RETRIEVAL_TASKS)
 
-        _ = evaluation.run(
-            model,
-            output_folder="results",
-            encode_kwargs={
-                "batch_size": 128,  # Adjust batch size as needed
-            },
-        )
-        calculate_averages("results/" + model_name.replace("/", "__") + "/MTEB_" + str(context_length))
+def compute(list_model, crop=False):
+    for model_name in tqdm(list_model):
+        for context_length in [256]:  # , 512]:
+            # Load a model
+            model = SparseEncoder(model_name, trust_remote_code=True)
+            model.max_seq_length = context_length  # Set the max sequence length for the evaluation
+            if crop:
+                model.max_active_dims = 200
+            model.model_card_data.model_name = model_name
+            # Create MTEB evaluation with device specification
+            evaluation = MTEB(tasks=MTEB_EN_V2_RETRIEVAL_TASKS)
+
+            _ = evaluation.run(
+                model,
+                output_folder="results",
+                encode_kwargs={
+                    "batch_size": 128,  # Adjust batch size as needed
+                },
+            )
+            calculate_averages("results/" + model_name.replace("/", "__") + "/MTEB_" + str(context_length))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train a Sparse Encoder model for Information Retrieval.")
+    parser.add_argument(
+        "--model_name", type=str, default="google-bert/bert-base-multilingual-uncased", help="Model name."
+    )
+    parser.add_argument(
+        "--crop",
+        action="store_true",
+        help="Whether to crop the model (freeze layers except last transformer and pooler).",
+    )
+    args = parser.parse_args()
+    model_name = args.model_name
+    logging.info(f"Evaluating model: {model_name}")
+    logging.info(f"Crop: {args.crop}")
+    compute([model_name], crop=args.crop)

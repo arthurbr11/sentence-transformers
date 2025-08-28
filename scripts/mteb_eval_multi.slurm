@@ -16,4 +16,4 @@ source .venv/bin/activate
 uv pip install .
 
 # Run the evaluation script
-python examples/sparse_encoder/evaluation/mteb_eval.py --model_name models/splade-bert-base-multilingual-uncased-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1
+python examples/sparse_encoder/evaluation/mteb_eval.py

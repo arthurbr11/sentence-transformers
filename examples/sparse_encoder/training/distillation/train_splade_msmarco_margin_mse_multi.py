@@ -46,12 +46,13 @@ def main():
         default="datasets/swim-ir-monolingual-Qwen3-8B-scores-4",
         help="Dataset name.",
     )
-    os.environ.setdefault("WANDB_PROJECT", "splade-multi-training")
     parser.add_argument(
         "--resume_from_checkpoint", type=str, default=None, help="Path to checkpoint directory to resume from."
     )
+    os.environ.setdefault("WANDB_PROJECT", "splade-multi-training")
 
     args = parser.parse_args()
+    resume_from_checkpoint = args.resume_from_checkpoint
     model_name = args.model_name
     short_model_name = model_name if "/" not in model_name else model_name.split("/")[-1]
 
@@ -138,9 +139,10 @@ def main():
         loss=loss,
         evaluator=evaluator,
     )
-    if args.resume_from_checkpoint is not None:
-        logging.info(f"Resuming training from checkpoint: {args.resume_from_checkpoint}")
-        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    if resume_from_checkpoint is not None:
+        print("=====================================")
+        logging.info(f"Resuming training from checkpoint: {resume_from_checkpoint}")
+        trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     else:
         trainer.train()
 

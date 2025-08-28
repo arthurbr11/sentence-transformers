@@ -1,3 +1,4 @@
+import argparse
 import logging
 import os
 
@@ -32,28 +33,33 @@ custom_models = [
     # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.3-ld_0.25/checkpoint-77800",
     # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-58350",
     # "models/splade-ettin-encoder-150m-msmarco-Qwen3-8B-scores-4-bs_128-lr_8e-05-lq_0.1-ld_0.1/checkpoint-85580",
-    "models/splade-bert-base-multilingual-uncased-swim-ir-monolingual-Qwen3-8B-scores-4-bs_128-lr_2e-05-lq_0.1-ld_0.1/checkpoint-68000"
+    # "merged_model-3",
 ]
 
-for model_name in tqdm(model_to_eval + custom_models):
-    for context_length in [256, 512]:
-        path = f"results/{model_name.replace('/', '__')}/NanoBEIR_{context_length}"
-        if os.path.exists(path):
-            print(f"Results already exist for {model_name} with context length {context_length}. Skipping...")
-            continue
-        # Load a model
-        model = SparseEncoder(model_name, trust_remote_code=True)
-        model.max_seq_length = context_length  # Set the max sequence length for the evaluation
 
-        evaluator = SparseNanoBEIREvaluator(
-            dataset_names=None,  # None means evaluate on all datasets
-            show_progress_bar=True,
-            batch_size=32,
-        )
+def compute(list_model, crop=False):
+    for model_name in tqdm(list_model):
+        for context_length in [256]:  # , 512]:
+            path = f"results/{model_name.replace('/', '__')}/NanoBEIR_{context_length}"
+            if os.path.exists(path):
+                print(f"Results already exist for {model_name} with context length {context_length}. Skipping...")
+                continue
+            # Load a model
+            model = SparseEncoder(model_name, trust_remote_code=True)
+            model.max_seq_length = context_length  # Set the max sequence length for the evaluation
+            if crop:
+                model.max_active_dims = 200
+            evaluator = SparseNanoBEIREvaluator(
+                dataset_names=None,  # None means evaluate on all datasets
+                show_progress_bar=True,
+                batch_size=32,
+            )
 
-        os.makedirs(path, exist_ok=True)
-        # Run evaluation
-        results = evaluator(model, output_path=path)
+            os.makedirs(path, exist_ok=True)
+            # Run evaluation
+            _ = evaluator(model, output_path=path)
+
+
 """
 ----------------------------------------------- naver/splade-cocondenser-ensembledistil_512
 Average Queries: 49.92307692307692
@@ -482,3 +488,18 @@ Primary metric: NanoBEIR_mean_dot_ndcg@10
 Primary metric value: 0.6337
 
 """
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train a Sparse Encoder model for Information Retrieval.")
+    parser.add_argument(
+        "--model_name", type=str, default="google-bert/bert-base-multilingual-uncased", help="Model name."
+    )
+    parser.add_argument(
+        "--crop",
+        action="store_true",
+        help="Whether to crop the model (freeze layers except last transformer and pooler).",
+    )
+    args = parser.parse_args()
+    model_name = args.model_name
+    logging.info(f"Evaluating model: {model_name}")
+    logging.info(f"Crop: {args.crop}")
+    compute([model_name], crop=args.crop)
