@@ -379,6 +379,9 @@ def create_summary_table(models, all_data):
     for model_name in sorted(models["custom"]):
         row = {"Model": model_name, "Type": "Custom"}
 
+        # Check if model has any data at all
+        has_any_data = False
+
         for context in CONTEXT_LENGTHS:
             mean_data = all_data[model_name][context]["mean"]
             mteb_english_average = all_data[model_name][context]["mteb_english_average"]
@@ -388,6 +391,7 @@ def create_summary_table(models, all_data):
                 row[f"{context}_FLOPS"] = format_value(mean_data.get(METRICS["flops"], np.nan))
                 row[f"{context}_QueryDims"] = format_value(mean_data.get(METRICS["query_dims"], np.nan), 1)
                 row[f"{context}_CorpusDims"] = format_value(mean_data.get(METRICS["corpus_dims"], np.nan), 1)
+                has_any_data = True
             else:
                 for metric in ["NDCG", "FLOPS", "QueryDims", "CorpusDims"]:
                     row[f"{context}_{metric}"] = "N/A"
@@ -395,12 +399,17 @@ def create_summary_table(models, all_data):
             # Add MTEB English average
             if mteb_english_average is not None:
                 row[f"{context}_MTEB"] = format_value(mteb_english_average.get("main_score", np.nan) * 100)
+                has_any_data = True
             else:
                 row[f"{context}_MTEB"] = "N/A"
-        rows.append(row)
 
-    # Add separator
-    if models["custom"] and models["pretrained"]:
+        # Only add row if it has any data
+        if has_any_data:
+            rows.append(row)
+
+    # Add separator only if there are custom models with data
+    custom_models_added = len(rows) > 0  # Check if any custom models were added
+    if models["custom"] and models["pretrained"] and custom_models_added:
         sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator"}
         for context in CONTEXT_LENGTHS:
             for metric in ["NDCG", "FLOPS", "QueryDims", "CorpusDims", "MTEB"]:
@@ -411,6 +420,9 @@ def create_summary_table(models, all_data):
     for model_name in sorted(models["pretrained"]):
         row = {"Model": model_name, "Type": "Pretrained"}
 
+        # Check if model has any data at all
+        has_any_data = False
+
         for context in CONTEXT_LENGTHS:
             mean_data = all_data[model_name][context]["mean"]
             mteb_english_average = all_data[model_name][context]["mteb_english_average"]
@@ -420,6 +432,7 @@ def create_summary_table(models, all_data):
                 row[f"{context}_FLOPS"] = format_value(mean_data.get(METRICS["flops"], np.nan))
                 row[f"{context}_QueryDims"] = format_value(mean_data.get(METRICS["query_dims"], np.nan), 1)
                 row[f"{context}_CorpusDims"] = format_value(mean_data.get(METRICS["corpus_dims"], np.nan), 1)
+                has_any_data = True
             else:
                 for metric in ["NDCG", "FLOPS", "QueryDims", "CorpusDims"]:
                     row[f"{context}_{metric}"] = "N/A"
@@ -427,9 +440,13 @@ def create_summary_table(models, all_data):
             # Add MTEB English average
             if mteb_english_average is not None:
                 row[f"{context}_MTEB"] = format_value(mteb_english_average.get("main_score", np.nan) * 100)
+                has_any_data = True
             else:
                 row[f"{context}_MTEB"] = "N/A"
-        rows.append(row)
+
+        # Only add row if it has any data
+        if has_any_data:
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -440,10 +457,13 @@ def create_dataset_table(models, all_data, context_length):
 
     # Custom models
     for model_name in sorted(models["custom"]):
-        row = {"Model": model_name, "Type": "Custom"}
-
         mean_data = all_data[model_name][context_length]["mean"]
         dataset_data = all_data[model_name][context_length]["datasets"]
+
+        row = {"Model": model_name, "Type": "Custom"}
+
+        # Check if model has any NanoBEIR data
+        has_any_data = False
 
         # Add dataset columns
         for dataset in DATASETS:
@@ -452,6 +472,7 @@ def create_dataset_table(models, all_data, context_length):
                 ndcg = format_value(data.get(METRICS["ndcg"], np.nan) * 100)
                 flops = format_value(data.get(METRICS["flops"], np.nan))
                 row[dataset] = f"{ndcg} ({flops})"
+                has_any_data = True
             else:
                 row[dataset] = "N/A"
 
@@ -460,13 +481,16 @@ def create_dataset_table(models, all_data, context_length):
             ndcg = format_value(mean_data.get(METRICS["ndcg"], np.nan) * 100)
             flops = format_value(mean_data.get(METRICS["flops"], np.nan))
             row["Average"] = f"{ndcg} ({flops})"
+            has_any_data = True
         else:
             row["Average"] = "N/A"
 
-        rows.append(row)
+        # Only add row if it has any NanoBEIR data
+        if has_any_data:
+            rows.append(row)
 
     # Separator
-    if models["custom"] and models["pretrained"]:
+    if models["custom"] and models["pretrained"] and rows:  # Only add separator if there are custom models with data
         sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator"}
         for col in DATASETS + ["Average"]:
             sep_row[col] = "---"
@@ -474,10 +498,13 @@ def create_dataset_table(models, all_data, context_length):
 
     # Pretrained models
     for model_name in sorted(models["pretrained"]):
-        row = {"Model": model_name, "Type": "Pretrained"}
-
         mean_data = all_data[model_name][context_length]["mean"]
         dataset_data = all_data[model_name][context_length]["datasets"]
+
+        row = {"Model": model_name, "Type": "Pretrained"}
+
+        # Check if model has any NanoBEIR data
+        has_any_data = False
 
         # Add dataset columns
         for dataset in DATASETS:
@@ -486,6 +513,7 @@ def create_dataset_table(models, all_data, context_length):
                 ndcg = format_value(data.get(METRICS["ndcg"], np.nan) * 100)
                 flops = format_value(data.get(METRICS["flops"], np.nan))
                 row[dataset] = f"{ndcg} ({flops})"
+                has_any_data = True
             else:
                 row[dataset] = "N/A"
 
@@ -494,10 +522,13 @@ def create_dataset_table(models, all_data, context_length):
             ndcg = format_value(mean_data.get(METRICS["ndcg"], np.nan) * 100)
             flops = format_value(mean_data.get(METRICS["flops"], np.nan))
             row["Average"] = f"{ndcg} ({flops})"
+            has_any_data = True
         else:
             row["Average"] = "N/A"
 
-        rows.append(row)
+        # Only add row if it has any NanoBEIR data
+        if has_any_data:
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -508,56 +539,86 @@ def create_mteb_english_table(models, all_data, context_length):
 
     # Custom models
     for model_name in sorted(models["custom"]):
-        row = {"Model": model_name, "Type": "Custom"}
-
         mteb_english_average = all_data[model_name][context_length]["mteb_english_average"]
         mteb_english_datasets = all_data[model_name][context_length]["mteb_english_datasets"]
+
+        # Get FLOPS from NanoBEIR 256 context
+        nanobeir_256_data = all_data[model_name][256]["mean"]
+        flops_value = "N/A"
+        if nanobeir_256_data is not None:
+            flops_raw = nanobeir_256_data.get(METRICS["flops"], np.nan)
+            if not pd.isna(flops_raw):
+                flops_value = format_value(flops_raw)
+
+        # Check if model has any MTEB data
+        has_any_data = False
+
+        # Add English average first (right after FLOPS)
+        if mteb_english_average is not None:
+            english_avg_score = format_value(mteb_english_average.get("main_score", np.nan) * 100)
+            has_any_data = True
+        else:
+            english_avg_score = "N/A"
+
+        row = {"Model": model_name, "Type": "Custom", "FLOPS": flops_value, "English_Average": english_avg_score}
 
         # Add dataset columns
         for dataset in MTEB_ENGLISH_DATASETS:
             if dataset in mteb_english_datasets:
                 score = format_value(mteb_english_datasets[dataset].get("main_score", np.nan) * 100)
                 row[dataset] = score
+                has_any_data = True
             else:
                 row[dataset] = "N/A"
 
-        # Add English average
-        if mteb_english_average is not None:
-            row["English_Average"] = format_value(mteb_english_average.get("main_score", np.nan) * 100)
-        else:
-            row["English_Average"] = "N/A"
-
-        rows.append(row)
+        # Only add row if it has any MTEB data
+        if has_any_data:
+            rows.append(row)
 
     # Separator
-    if models["custom"] and models["pretrained"]:
-        sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator"}
-        for col in MTEB_ENGLISH_DATASETS + ["English_Average"]:
-            sep_row[col] = "---"
+    if models["custom"] and models["pretrained"] and rows:  # Only add separator if there are custom models with data
+        sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator", "FLOPS": "---", "English_Average": "---"}
+        for dataset in MTEB_ENGLISH_DATASETS:
+            sep_row[dataset] = "---"
         rows.append(sep_row)
 
     # Pretrained models
     for model_name in sorted(models["pretrained"]):
-        row = {"Model": model_name, "Type": "Pretrained"}
-
         mteb_english_average = all_data[model_name][context_length]["mteb_english_average"]
         mteb_english_datasets = all_data[model_name][context_length]["mteb_english_datasets"]
+
+        # Get FLOPS from NanoBEIR 256 context
+        nanobeir_256_data = all_data[model_name][256]["mean"]
+        flops_value = "N/A"
+        if nanobeir_256_data is not None:
+            flops_raw = nanobeir_256_data.get(METRICS["flops"], np.nan)
+            if not pd.isna(flops_raw):
+                flops_value = format_value(flops_raw)
+
+        # Check if model has any MTEB data
+        has_any_data = False
+
+        # Add English average first (right after FLOPS)
+        if mteb_english_average is not None:
+            english_avg_score = format_value(mteb_english_average.get("main_score", np.nan) * 100)
+            has_any_data = True
+        else:
+            english_avg_score = "N/A"
+
+        row = {"Model": model_name, "Type": "Pretrained", "FLOPS": flops_value, "English_Average": english_avg_score}
 
         # Add dataset columns
         for dataset in MTEB_ENGLISH_DATASETS:
             if dataset in mteb_english_datasets:
                 score = format_value(mteb_english_datasets[dataset].get("main_score", np.nan) * 100)
                 row[dataset] = score
+                has_any_data = True
             else:
                 row[dataset] = "N/A"
 
-        # Add English average
-        if mteb_english_average is not None:
-            row["English_Average"] = format_value(mteb_english_average.get("main_score", np.nan) * 100)
-        else:
-            row["English_Average"] = "N/A"
-
-        rows.append(row)
+        # Only add row if it has any MTEB data
+        if has_any_data:
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -580,57 +641,86 @@ def create_mteb_multilingual_table(models, all_data, context_length):
 
     # Custom models
     for model_name in sorted(models["custom"]):
-        row = {"Model": model_name, "Type": "Custom"}
-
         multilingual_averages = all_data[model_name][context_length]["mteb_multilingual_averages"]
         global_average = all_data[model_name][context_length]["mteb_global_average"]
+
+        # Get FLOPS from NanoBEIR 256 context
+        nanobeir_256_data = all_data[model_name][256]["mean"]
+        flops_value = "N/A"
+        if nanobeir_256_data is not None:
+            flops_raw = nanobeir_256_data.get(METRICS["flops"], np.nan)
+            if not pd.isna(flops_raw):
+                flops_value = format_value(flops_raw)
+
+        # Check if model has any MTEB data
+        has_any_data = False
+
+        # Add global average first (right after FLOPS)
+        if global_average is not None:
+            global_avg_score = format_value(global_average.get("main_score", np.nan) * 100)
+            has_any_data = True
+        else:
+            global_avg_score = "N/A"
+
+        row = {"Model": model_name, "Type": "Custom", "FLOPS": flops_value, "Global_Average": global_avg_score}
 
         # Add language-specific averages
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
             if lang_code in multilingual_averages:
                 score = format_value(multilingual_averages[lang_code].get("main_score", np.nan) * 100)
                 row[f"{lang_code.upper()}_Avg"] = score
+                has_any_data = True
             else:
                 row[f"{lang_code.upper()}_Avg"] = "N/A"
 
-        # Add global average
-        if global_average is not None:
-            row["Global_Average"] = format_value(global_average.get("main_score", np.nan) * 100)
-        else:
-            row["Global_Average"] = "N/A"
-
-        rows.append(row)
+        # Only add row if it has any MTEB data
+        if has_any_data:
+            rows.append(row)
 
     # Separator
-    if models["custom"] and models["pretrained"]:
-        sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator"}
+    if models["custom"] and models["pretrained"] and rows:  # Only add separator if there are custom models with data
+        sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator", "FLOPS": "---", "Global_Average": "---"}
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
             sep_row[f"{lang_code.upper()}_Avg"] = "---"
-        sep_row["Global_Average"] = "---"
         rows.append(sep_row)
 
     # Pretrained models
     for model_name in sorted(models["pretrained"]):
-        row = {"Model": model_name, "Type": "Pretrained"}
-
         multilingual_averages = all_data[model_name][context_length]["mteb_multilingual_averages"]
         global_average = all_data[model_name][context_length]["mteb_global_average"]
+
+        # Get FLOPS from NanoBEIR 256 context
+        nanobeir_256_data = all_data[model_name][256]["mean"]
+        flops_value = "N/A"
+        if nanobeir_256_data is not None:
+            flops_raw = nanobeir_256_data.get(METRICS["flops"], np.nan)
+            if not pd.isna(flops_raw):
+                flops_value = format_value(flops_raw)
+
+        # Check if model has any MTEB data
+        has_any_data = False
+
+        # Add global average first (right after FLOPS)
+        if global_average is not None:
+            global_avg_score = format_value(global_average.get("main_score", np.nan) * 100)
+            has_any_data = True
+        else:
+            global_avg_score = "N/A"
+
+        row = {"Model": model_name, "Type": "Pretrained", "FLOPS": flops_value, "Global_Average": global_avg_score}
 
         # Add language-specific averages
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
             if lang_code in multilingual_averages:
                 score = format_value(multilingual_averages[lang_code].get("main_score", np.nan) * 100)
                 row[f"{lang_code.upper()}_Avg"] = score
+                has_any_data = True
             else:
                 row[f"{lang_code.upper()}_Avg"] = "N/A"
 
-        # Add global average
-        if global_average is not None:
-            row["Global_Average"] = format_value(global_average.get("main_score", np.nan) * 100)
-        else:
-            row["Global_Average"] = "N/A"
-
-        rows.append(row)
+        # Only add row if it has any MTEB data
+        if has_any_data:
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -658,11 +748,29 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
 
     # Custom models
     for model_name in sorted(models["custom"]):
-        row = {"Model": model_name, "Type": "Custom"}
-
         multilingual_datasets = all_data[model_name][context_length]["mteb_multilingual_datasets"]
         multilingual_averages = all_data[model_name][context_length]["mteb_multilingual_averages"]
         global_average = all_data[model_name][context_length]["mteb_global_average"]
+
+        # Get FLOPS from NanoBEIR 256 context
+        nanobeir_256_data = all_data[model_name][256]["mean"]
+        flops_value = "N/A"
+        if nanobeir_256_data is not None:
+            flops_raw = nanobeir_256_data.get(METRICS["flops"], np.nan)
+            if not pd.isna(flops_raw):
+                flops_value = format_value(flops_raw)
+
+        # Check if model has any MTEB data
+        has_any_data = False
+
+        # Add global average first (right after FLOPS)
+        if global_average is not None:
+            global_avg_score = format_value(global_average.get("main_score", np.nan) * 100)
+            has_any_data = True
+        else:
+            global_avg_score = "N/A"
+
+        row = {"Model": model_name, "Type": "Custom", "FLOPS": flops_value, "Global_Average": global_avg_score}
 
         # Add columns for each language and dataset combination
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
@@ -670,6 +778,7 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
             if lang_code in multilingual_averages:
                 score = format_value(multilingual_averages[lang_code].get("main_score", np.nan) * 100)
                 row[f"{lang_code.upper()}_Avg"] = score
+                has_any_data = True
             else:
                 row[f"{lang_code.upper()}_Avg"] = "N/A"
 
@@ -679,34 +788,48 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
                 if dataset in lang_datasets:
                     score = format_value(lang_datasets[dataset].get("main_score", np.nan) * 100)
                     row[f"{lang_code.upper()}_{dataset}"] = score
+                    has_any_data = True
                 else:
                     row[f"{lang_code.upper()}_{dataset}"] = "N/A"
 
-        # Add global average
-        if global_average is not None:
-            row["Global_Average"] = format_value(global_average.get("main_score", np.nan) * 100)
-        else:
-            row["Global_Average"] = "N/A"
-
-        rows.append(row)
+        # Only add row if it has any MTEB data
+        if has_any_data:
+            rows.append(row)
 
     # Separator
-    if models["custom"] and models["pretrained"]:
-        sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator"}
+    if models["custom"] and models["pretrained"] and rows:  # Only add separator if there are custom models with data
+        sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator", "FLOPS": "---", "Global_Average": "---"}
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
             sep_row[f"{lang_code.upper()}_Avg"] = "---"
             for dataset in LANGUAGE_CONFIGS[lang_code]["tasks"]:
                 sep_row[f"{lang_code.upper()}_{dataset}"] = "---"
-        sep_row["Global_Average"] = "---"
         rows.append(sep_row)
 
     # Pretrained models
     for model_name in sorted(models["pretrained"]):
-        row = {"Model": model_name, "Type": "Pretrained"}
-
         multilingual_datasets = all_data[model_name][context_length]["mteb_multilingual_datasets"]
         multilingual_averages = all_data[model_name][context_length]["mteb_multilingual_averages"]
         global_average = all_data[model_name][context_length]["mteb_global_average"]
+
+        # Get FLOPS from NanoBEIR 256 context
+        nanobeir_256_data = all_data[model_name][256]["mean"]
+        flops_value = "N/A"
+        if nanobeir_256_data is not None:
+            flops_raw = nanobeir_256_data.get(METRICS["flops"], np.nan)
+            if not pd.isna(flops_raw):
+                flops_value = format_value(flops_raw)
+
+        # Check if model has any MTEB data
+        has_any_data = False
+
+        # Add global average first (right after FLOPS)
+        if global_average is not None:
+            global_avg_score = format_value(global_average.get("main_score", np.nan) * 100)
+            has_any_data = True
+        else:
+            global_avg_score = "N/A"
+
+        row = {"Model": model_name, "Type": "Pretrained", "FLOPS": flops_value, "Global_Average": global_avg_score}
 
         # Add columns for each language and dataset combination
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
@@ -714,6 +837,7 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
             if lang_code in multilingual_averages:
                 score = format_value(multilingual_averages[lang_code].get("main_score", np.nan) * 100)
                 row[f"{lang_code.upper()}_Avg"] = score
+                has_any_data = True
             else:
                 row[f"{lang_code.upper()}_Avg"] = "N/A"
 
@@ -723,16 +847,13 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
                 if dataset in lang_datasets:
                     score = format_value(lang_datasets[dataset].get("main_score", np.nan) * 100)
                     row[f"{lang_code.upper()}_{dataset}"] = score
+                    has_any_data = True
                 else:
                     row[f"{lang_code.upper()}_{dataset}"] = "N/A"
 
-        # Add global average
-        if global_average is not None:
-            row["Global_Average"] = format_value(global_average.get("main_score", np.nan) * 100)
-        else:
-            row["Global_Average"] = "N/A"
-
-        rows.append(row)
+        # Only add row if it has any MTEB data
+        if has_any_data:
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -789,7 +910,9 @@ def identify_best_performers(df):
     return performance
 
 
-def save_excel_with_formatting(summary_df, dataset_dfs, perf_data, output_dir):
+def save_excel_with_formatting(
+    summary_df, dataset_dfs, mteb_dfs, mteb_multilingual_dfs, mteb_multilingual_datasets_dfs, perf_data, output_dir
+):
     """Save to Excel with proper formatting"""
     filename = "results.xlsx"
     filepath = os.path.join(output_dir, filename)
@@ -813,7 +936,7 @@ def save_excel_with_formatting(summary_df, dataset_dfs, perf_data, output_dir):
         start_col = col_idx
         ws_summary.cell(1, col_idx, f"Context {context}")
 
-        for metric in ["NDCG", "FLOPS", "QueryDims", "CorpusDims"]:
+        for metric in ["NDCG", "FLOPS", "QueryDims", "CorpusDims", "MTEB"]:
             ws_summary.cell(2, col_idx, metric)
             col_mapping[f"{context}_{metric}"] = col_idx
             col_idx += 1
@@ -861,9 +984,9 @@ def save_excel_with_formatting(summary_df, dataset_dfs, perf_data, output_dir):
     for col in range(1, col_idx):
         ws_summary.column_dimensions[get_column_letter(col)].width = 15
 
-    # Dataset sheets
+    # Dataset sheets (NanoBEIR)
     for context, df in dataset_dfs.items():
-        ws = wb.create_sheet(f"Datasets_{context}")
+        ws = wb.create_sheet(f"NanoBEIR_{context}")
 
         # Add headers
         for col_idx, col_name in enumerate(df.columns, 1):
@@ -875,13 +998,82 @@ def save_excel_with_formatting(summary_df, dataset_dfs, perf_data, output_dir):
                 cell = ws.cell(row_idx, col_idx, value)
 
                 # Apply highlighting for separator rows
-                if row["Type"] == "Separator":
+                if row.get("Type") == "Separator":
                     cell.fill = SEPARATOR_FILL
                     cell.font = Font(bold=True)
 
         # Auto-adjust widths
         for col in range(1, len(df.columns) + 1):
             ws.column_dimensions[get_column_letter(col)].width = 12
+
+    # MTEB English sheet
+    for context, df in mteb_dfs.items():
+        if not df.empty:
+            ws = wb.create_sheet(f"MTEB_English_{context}")
+
+            # Add headers
+            for col_idx, col_name in enumerate(df.columns, 1):
+                ws.cell(1, col_idx, col_name).font = HEADER_FONT
+
+            # Add data
+            for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
+                for col_idx, (col_name, value) in enumerate(row.items(), 1):
+                    cell = ws.cell(row_idx, col_idx, value)
+
+                    # Apply highlighting for separator rows
+                    if row.get("Type") == "Separator":
+                        cell.fill = SEPARATOR_FILL
+                        cell.font = Font(bold=True)
+
+            # Auto-adjust widths
+            for col in range(1, len(df.columns) + 1):
+                ws.column_dimensions[get_column_letter(col)].width = 12
+
+    # MTEB Multilingual Average sheets
+    for context, df in mteb_multilingual_dfs.items():
+        if not df.empty:
+            ws = wb.create_sheet(f"MTEB_Multilingual_Avg_{context}")
+
+            # Add headers
+            for col_idx, col_name in enumerate(df.columns, 1):
+                ws.cell(1, col_idx, col_name).font = HEADER_FONT
+
+            # Add data
+            for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
+                for col_idx, (col_name, value) in enumerate(row.items(), 1):
+                    cell = ws.cell(row_idx, col_idx, value)
+
+                    # Apply highlighting for separator rows
+                    if row.get("Type") == "Separator":
+                        cell.fill = SEPARATOR_FILL
+                        cell.font = Font(bold=True)
+
+            # Auto-adjust widths
+            for col in range(1, len(df.columns) + 1):
+                ws.column_dimensions[get_column_letter(col)].width = 12
+
+    # MTEB Multilingual Datasets sheets
+    for context, df in mteb_multilingual_datasets_dfs.items():
+        if not df.empty:
+            ws = wb.create_sheet(f"MTEB_Multilingual_Datasets_{context}")
+
+            # Add headers
+            for col_idx, col_name in enumerate(df.columns, 1):
+                ws.cell(1, col_idx, col_name).font = HEADER_FONT
+
+            # Add data
+            for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
+                for col_idx, (col_name, value) in enumerate(row.items(), 1):
+                    cell = ws.cell(row_idx, col_idx, value)
+
+                    # Apply highlighting for separator rows
+                    if row.get("Type") == "Separator":
+                        cell.fill = SEPARATOR_FILL
+                        cell.font = Font(bold=True)
+
+            # Auto-adjust widths
+            for col in range(1, len(df.columns) + 1):
+                ws.column_dimensions[get_column_letter(col)].width = 12
 
     wb.save(filepath)
     print(f"Saved Excel: {filename}")
@@ -907,40 +1099,167 @@ def save_html_with_tabs(
     <head>
         <title>Sentence Transformers Results - {timestamp}</title>
         <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            .tabs {{ display: flex; background-color: #f1f1f1; border-radius: 8px 8px 0 0; }}
-            .tab {{ background-color: inherit; border: none; outline: none; cursor: pointer;
-                   padding: 14px 20px; transition: 0.3s; font-size: 16px; }}
-            .tab:hover {{ background-color: #ddd; }}
-            .tab.active {{ background-color: #007acc; color: white; }}
-            .tabcontent {{ display: none; padding: 20px; border: 1px solid #ccc; border-top: none; }}
-            .tabcontent.active {{ display: block; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
-            th {{ background-color: #f2f2f2; font-weight: bold; }}
-            .context-header {{ background-color: #e6f3ff; font-weight: bold; font-size: 14px; }}
-            tr:nth-child(even) {{ background-color: #f9f9f9; }}
-            .separator {{ background-color: #cccccc; font-weight: bold; }}
-            .best {{ color: red; font-weight: bold; }}
-            .top10 {{ text-decoration: underline; }}
-            .model-name {{ text-align: left; font-weight: bold; }}
-            h1 {{ color: #333; text-align: center; margin-bottom: 30px; }}
-            h2 {{ color: #666; margin-bottom: 20px; }}
-            .timestamp {{ text-align: center; color: #888; margin-bottom: 20px; }}
+            body {{ font-family: Arial, sans-serif;margin: 20px;}}
+            .tabs {{ display: flex;background-color: #f1f1f1;border-radius: 8px 8px 0 0;}}
+            .tab {{ background-color: inherit;border: none;outline: none;cursor: pointer;
+                   padding: 14px 20px;transition: 0.3s;font-size: 16px;}}
+            .tab:hover {{ background-color: #ddd;}}
+            .tab.active {{ background-color: #007acc;color: white;}}
+            .tabcontent {{ display: none;padding: 20px;border: 1px solid #ccc;border-top: none;}}
+            .tabcontent.active {{ display: block;}}
+            .filter-section {{
+                margin: 20px 0;
+                padding: 15px;
+                background-color: #f8f9fa;
+                border-radius: 8px;
+                border: 1px solid #dee2e6;
+            }}
+            .filter-title {{
+                font-weight: bold;
+                margin-bottom: 10px;
+                color: #495057;
+            }}
+            .filter-buttons {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+            }}
+            .filter-btn {{
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                transition: all 0.3s ease;
+            }}
+            .filter-btn:hover {{ background-color: #5a6268;}}
+            .filter-btn.active {{ background-color: #007bff;}}
+            .filter-btn.all {{ background-color: #28a745;}}
+            .filter-btn.all.active {{ background-color: #1e7e34;}}
+            table {{ border-collapse: collapse;width: 100%;margin-top: 20px;}}
+            th, td {{ border: 1px solid #ddd;padding: 8px;text-align: center;}}
+            th {{ background-color: #f2f2f2;font-weight: bold;}}
+            .context-header {{ background-color: #e6f3ff;font-weight: bold;font-size: 14px;}}
+            tr:nth-child(even) {{ background-color: #f9f9f9;}}
+            .separator {{ background-color: #cccccc;font-weight: bold;}}
+            .best {{ color: red;font-weight: bold;}}
+            .top10 {{ text-decoration: underline;}}
+            .model-name {{ text-align: left;font-weight: bold;}}
+            .model-row.hidden {{ display: none;}}
+            h1 {{ color: #333;text-align: center;margin-bottom: 30px;}}
+            h2 {{ color: #666;margin-bottom: 20px;}}
+            .timestamp {{ text-align: center;color: #888;margin-bottom: 20px;}}
         </style>
         <script>
             function openTab(evt, tabName) {{
                 var i, tabcontent, tabs;
                 tabcontent = document.getElementsByClassName("tabcontent");
-                for (i = 0; i < tabcontent.length; i++) {{
+                for (i = 0;i < tabcontent.length;i++) {{
                     tabcontent[i].classList.remove("active");
                 }}
                 tabs = document.getElementsByClassName("tab");
-                for (i = 0; i < tabs.length; i++) {{
+                for (i = 0;i < tabs.length;i++) {{
                     tabs[i].classList.remove("active");
                 }}
                 document.getElementById(tabName).classList.add("active");
                 evt.currentTarget.classList.add("active");
+            }}
+
+            function filterModels(filterType, containerId) {{
+                // Define filter patterns
+                const filters = {{
+                    'all': () => true,
+                    'modernbert-base': (name) => name.toLowerCase().includes('modernbert-base'),
+                    'bert-base': (name) => {{
+                        const lowerName = name.toLowerCase();
+                        return (lowerName.includes('splade-bert-base-uncased') || lowerName.includes('bert-base-1')) &&
+                               !lowerName.includes('modernbert-base') &&!lowerName.includes('multilingual');
+                    }},
+                    'co-condenser-msmarco': (name) => name.toLowerCase().includes('co-condenser') &&name.toLowerCase().includes('msmarco'),
+                    'co-condenser-nomic': (name) => name.toLowerCase().includes('co-condenser') &&name.toLowerCase().includes('nomic'),
+                    'distilbert-base': (name) => {{
+                        const lowerName = name.toLowerCase();
+                        return (lowerName.includes('distilbert-base-1') || lowerName.includes('distilbert-base-uncased')) &&
+                               !lowerName.includes('multilingual');
+                    }},
+                    'ettin-encoder-150m-lowercase': (name) => name.toLowerCase().includes('ettin-encoder-150m-lowercase'),
+                    'ettin-encoder-150m-uncased-en-en': (name) => name.toLowerCase().includes('ettin-encoder-150m-uncased-en-en'),
+                    'ettin-encoder-150m': (name) => {{
+                        const lowerName = name.toLowerCase();
+                        return lowerName.includes('ettin-encoder-150m') &&
+                               !lowerName.includes('ettin-encoder-150m-lowercase') &&
+                               !lowerName.includes('ettin-encoder-150m-uncased-en-en');
+                    }},
+                    'ettin-encoder-400m': (name) => name.toLowerCase().includes('ettin-encoder-400m'),
+                    'ettin-encoder-68m': (name) => name.toLowerCase().includes('ettin-encoder-68m'),
+                    'ettin-encoder-32m': (name) => name.toLowerCase().includes('ettin-encoder-32m'),
+                    'modernbert-lowercase': (name) => name.toLowerCase().includes('modernbert-lowercase'),
+                    'gte-en-mlm-base': (name) => name.toLowerCase().includes('gte-en-mlm-base'),
+                    'eurobert-210m': (name) => name.toLowerCase().includes('eurobert-210m'),
+                    'bert-base-multilingual': (name) => name.toLowerCase().includes('bert-base-multilingual-uncased'),
+                    'distilbert-base-multilingual-cased': (name) => name.toLowerCase().includes('distilbert-base-multilingual-cased'),
+                    'other': (name) => {{
+                        const lowerName = name.toLowerCase();
+                        // Check if it matches any of the specific patterns
+                        const matchesPatterns = [
+                            // ModernBERT-base
+                            lowerName.includes('modernbert-base'),
+                            // bert-base (splade-bert-base-uncased OR bert-base-1, but not modernbert or multilingual)
+                            (lowerName.includes('splade-bert-base-uncased') || lowerName.includes('bert-base-1')) &&
+                            !lowerName.includes('modernbert-base') &&!lowerName.includes('multilingual'),
+                            // co-condenser variants
+                            lowerName.includes('co-condenser'),
+                            // distilbert-base (distilbert-base-1 OR distilbert-base-uncased, but not multilingual)
+                            (lowerName.includes('distilbert-base-1') || lowerName.includes('distilbert-base-uncased')) &&
+                            !lowerName.includes('multilingual'),
+                            // ettin variants
+                            lowerName.includes('ettin-encoder-150m') || lowerName.includes('ettin-encoder-400m') ||
+                            lowerName.includes('ettin-encoder-68m') || lowerName.includes('ettin-encoder-32m'),
+                            // modernbert-lowercase
+                            lowerName.includes('modernbert-lowercase'),
+                            // gte-en-mlm-base
+                            lowerName.includes('gte-en-mlm-base'),
+                            // eurobert-210m
+                            lowerName.includes('eurobert-210m'),
+                            // bert-base-multilingual
+                            lowerName.includes('bert-base-multilingual-uncased'),
+                            // distilbert-base-multilingual-cased
+                            lowerName.includes('distilbert-base-multilingual-cased')
+                        ];
+                        return !matchesPatterns.some(match => match);
+                    }}
+                }};
+
+                // Update button states
+                const buttons = document.querySelectorAll(`#${{containerId}} .filter-btn`);
+                buttons.forEach(btn => btn.classList.remove('active'));
+                event.target.classList.add('active');
+
+                // Filter rows
+                const container = document.getElementById(containerId);
+                const rows = container.querySelectorAll('.model-row');
+
+                rows.forEach(row => {{
+                    const modelNameCell = row.querySelector('.model-name');
+                    if (modelNameCell) {{
+                        const modelName = modelNameCell.textContent.trim();
+                        const isCustom = row.classList.contains('custom-model');
+
+                        // Only filter custom models, always show pretrained models and separators
+                        if (!isCustom || row.classList.contains('separator')) {{
+                            row.classList.remove('hidden');
+                        }} else {{
+                            const shouldShow = filters[filterType](modelName);
+                            if (shouldShow) {{
+                                row.classList.remove('hidden');
+                            }} else {{
+                                row.classList.add('hidden');
+                            }}
+                        }}
+                    }}
+                }});
             }}
         </script>
     </head>
@@ -953,33 +1272,33 @@ def save_html_with_tabs(
             <button class="tab" onclick="openTab(event, 'datasets_256')">📋 NanoBEIR 256</button>
             <button class="tab" onclick="openTab(event, 'datasets_512')">📋 NanoBEIR 512</button>
             <button class="tab" onclick="openTab(event, 'mteb_256')">🎯 MTEB English 256</button>
-            {'<button class="tab" onclick="openTab(event, \'mteb_multilingual_256\')">🌍 MTEB Multilingual Avg 256</button>' if not mteb_multilingual_dfs[256].empty else ''}
-            {'<button class="tab" onclick="openTab(event, \'mteb_multilingual_datasets_256\')">📊 MTEB Multilingual Datasets 256</button>' if not mteb_multilingual_datasets_dfs[256].empty else ''}
+            {'<button class="tab" onclick="openTab(event, \'mteb_multilingual_256\')">🌍 MTEB Multilingual Avg 256</button>' if not mteb_multilingual_dfs[256].empty else ""}
+            {'<button class="tab" onclick="openTab(event, \'mteb_multilingual_datasets_256\')">📊 MTEB Multilingual Datasets 256</button>' if not mteb_multilingual_datasets_dfs[256].empty else ""}
         </div>
 
         <div id="summary" class="tabcontent active">
             <h2>Summary - Average Metrics by Context Length (including MTEB)</h2>
-            {df_to_html_with_subcolumns(summary_df, perf_data.get("summary", {}))}
+            {df_to_html_with_subcolumns(summary_df, perf_data.get("summary", {}), "summary")}
         </div>
 
         <div id="datasets_256" class="tabcontent">
             <h2>NanoBEIR Individual Datasets - Context Length 256</h2>
-            {df_to_html_simple(dataset_dfs[256], perf_data.get("datasets_256", {}))}
+            {df_to_html_simple(dataset_dfs[256], perf_data.get("datasets_256", {}), "datasets_256")}
         </div>
 
         <div id="datasets_512" class="tabcontent">
             <h2>NanoBEIR Individual Datasets - Context Length 512</h2>
-            {df_to_html_simple(dataset_dfs[512], perf_data.get("datasets_512", {}))}
+            {df_to_html_simple(dataset_dfs[512], perf_data.get("datasets_512", {}), "datasets_512")}
         </div>
 
         <div id="mteb_256" class="tabcontent">
             <h2>MTEB English Individual Datasets - Context Length 256</h2>
-            {df_to_html_simple(mteb_dfs[256], perf_data.get("mteb_256", {}))}
+            {df_to_html_simple(mteb_dfs[256], perf_data.get("mteb_256", {}), "mteb_256")}
         </div>
 
-        {f'<div id="mteb_multilingual_256" class="tabcontent"><h2>MTEB Multilingual Language Averages - Context Length 256</h2>{df_to_html_simple(mteb_multilingual_dfs[256], perf_data.get("mteb_multilingual_256", {}))}</div>' if not mteb_multilingual_dfs[256].empty else ''}
+        {f'<div id="mteb_multilingual_256" class="tabcontent"><h2>MTEB Multilingual Language Averages - Context Length 256</h2>{df_to_html_simple(mteb_multilingual_dfs[256], perf_data.get("mteb_multilingual_256", {}), "mteb_multilingual_256")}</div>' if not mteb_multilingual_dfs[256].empty else ""}
 
-        {f'<div id="mteb_multilingual_datasets_256" class="tabcontent"><h2>MTEB Multilingual Individual Datasets - Context Length 256</h2>{df_to_html_simple(mteb_multilingual_datasets_dfs[256], perf_data.get("mteb_multilingual_datasets_256", {}))}</div>' if not mteb_multilingual_datasets_dfs[256].empty else ''}
+        {f'<div id="mteb_multilingual_datasets_256" class="tabcontent"><h2>MTEB Multilingual Individual Datasets - Context Length 256</h2>{df_to_html_simple(mteb_multilingual_datasets_dfs[256], perf_data.get("mteb_multilingual_datasets_256", {}), "mteb_multilingual_datasets_256")}</div>' if not mteb_multilingual_datasets_dfs[256].empty else ""}
 
     </body>
     </html>
@@ -990,9 +1309,37 @@ def save_html_with_tabs(
     print(f"Saved HTML: {filename}")
 
 
-def df_to_html_with_subcolumns(df, perf_data):
-    """Convert summary DataFrame to HTML with sub-column headers"""
-    html = "<table>"
+def df_to_html_with_subcolumns(df, perf_data, container_id="summary"):
+    """Convert summary DataFrame to HTML with sub-column headers and filters"""
+
+    # Add filter section
+    html = f"""
+    <div class="filter-section">
+        <div class="filter-title">🔍 Filter Custom Models:</div>
+        <div class="filter-buttons">
+            <button class="filter-btn all active" onclick="filterModels('all', '{container_id}')">All</button>
+            <button class="filter-btn" onclick="filterModels('modernbert-base', '{container_id}')">ModernBERT-base</button>
+            <button class="filter-btn" onclick="filterModels('bert-base', '{container_id}')">BERT-base</button>
+            <button class="filter-btn" onclick="filterModels('co-condenser-msmarco', '{container_id}')">Co-Condenser + MSMarco</button>
+            <button class="filter-btn" onclick="filterModels('co-condenser-nomic', '{container_id}')">Co-Condenser + Nomic</button>
+            <button class="filter-btn" onclick="filterModels('distilbert-base', '{container_id}')">DistilBERT-base</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-150m', '{container_id}')">Ettin-Encoder-150m</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-150m-lowercase', '{container_id}')">Ettin-Encoder-150m-lowercase</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-150m-uncased-en-en', '{container_id}')">Ettin-Encoder-150m-uncased-en-en</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-400m', '{container_id}')">Ettin-Encoder-400m</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-68m', '{container_id}')">Ettin-Encoder-68m</button>
+            <button class="filter-btn" onclick="filterModels('modernbert-lowercase', '{container_id}')">ModernBERT-lowercase</button>
+            <button class="filter-btn" onclick="filterModels('gte-en-mlm-base', '{container_id}')">GTE-EN-MLM-base</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-32m', '{container_id}')">Ettin-Encoder-32m</button>
+            <button class="filter-btn" onclick="filterModels('eurobert-210m', '{container_id}')">EuroBERT-210m</button>
+            <button class="filter-btn" onclick="filterModels('bert-base-multilingual', '{container_id}')">BERT-base-multilingual</button>
+            <button class="filter-btn" onclick="filterModels('distilbert-base-multilingual-cased', '{container_id}')">DistilBERT-base-multilingual-cased</button>
+            <button class="filter-btn" onclick="filterModels('other', '{container_id}')">Other</button>
+        </div>
+    </div>
+    """
+
+    html += "<table>"
 
     # Create multi-level header
     html += "<tr>"
@@ -1012,8 +1359,15 @@ def df_to_html_with_subcolumns(df, perf_data):
 
     # Data rows
     for idx, row in df.iterrows():
-        row_class = "separator" if row["Type"] == "Separator" else ""
-        html += f"<tr class='{row_class}'>"
+        row_classes = ["model-row"]
+        if row["Type"] == "Separator":
+            row_classes.append("separator")
+        elif row["Type"] == "Custom":
+            row_classes.append("custom-model")
+        elif row["Type"] == "Pretrained":
+            row_classes.append("pretrained-model")
+
+        html += f"<tr class='{' '.join(row_classes)}'>"
 
         html += f"<td class='model-name'>{row['Model']}</td>"
         html += f"<td>{row['Type']}</td>"
@@ -1040,9 +1394,37 @@ def df_to_html_with_subcolumns(df, perf_data):
     return html
 
 
-def df_to_html_simple(df, perf_data):
-    """Convert DataFrame to HTML with simple styling"""
-    html = "<table>"
+def df_to_html_simple(df, perf_data, container_id="table"):
+    """Convert DataFrame to HTML with simple styling and filters"""
+
+    # Add filter section
+    html = f"""
+    <div class="filter-section">
+        <div class="filter-title">🔍 Filter Custom Models:</div>
+        <div class="filter-buttons">
+            <button class="filter-btn all active" onclick="filterModels('all', '{container_id}')">All</button>
+            <button class="filter-btn" onclick="filterModels('modernbert-base', '{container_id}')">ModernBERT-base</button>
+            <button class="filter-btn" onclick="filterModels('bert-base', '{container_id}')">BERT-base</button>
+            <button class="filter-btn" onclick="filterModels('co-condenser-msmarco', '{container_id}')">Co-Condenser + MSMarco</button>
+            <button class="filter-btn" onclick="filterModels('co-condenser-nomic', '{container_id}')">Co-Condenser + Nomic</button>
+            <button class="filter-btn" onclick="filterModels('distilbert-base', '{container_id}')">DistilBERT-base</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-150m', '{container_id}')">Ettin-Encoder-150m</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-150m-lowercase', '{container_id}')">Ettin-Encoder-150m-lowercase</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-150m-uncased-en-en', '{container_id}')">Ettin-Encoder-150m-uncased-en-en</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-400m', '{container_id}')">Ettin-Encoder-400m</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-68m', '{container_id}')">Ettin-Encoder-68m</button>
+            <button class="filter-btn" onclick="filterModels('modernbert-lowercase', '{container_id}')">ModernBERT-lowercase</button>
+            <button class="filter-btn" onclick="filterModels('gte-en-mlm-base', '{container_id}')">GTE-EN-MLM-base</button>
+            <button class="filter-btn" onclick="filterModels('ettin-encoder-32m', '{container_id}')">Ettin-Encoder-32m</button>
+            <button class="filter-btn" onclick="filterModels('eurobert-210m', '{container_id}')">EuroBERT-210m</button>
+            <button class="filter-btn" onclick="filterModels('bert-base-multilingual', '{container_id}')">BERT-base-multilingual</button>
+            <button class="filter-btn" onclick="filterModels('distilbert-base-multilingual-cased', '{container_id}')">DistilBERT-base-multilingual-cased</button>
+            <button class="filter-btn" onclick="filterModels('other', '{container_id}')">Other</button>
+        </div>
+    </div>
+    """
+
+    html += "<table>"
 
     # Header
     html += "<tr>"
@@ -1052,14 +1434,21 @@ def df_to_html_simple(df, perf_data):
 
     # Rows
     for idx, row in df.iterrows():
-        row_class = "separator" if row["Type"] == "Separator" else ""
-        html += f"<tr class='{row_class}'>"
+        row_classes = ["model-row"]
+        if row.get("Type") == "Separator":
+            row_classes.append("separator")
+        elif row.get("Type") == "Custom":
+            row_classes.append("custom-model")
+        elif row.get("Type") == "Pretrained":
+            row_classes.append("pretrained-model")
+
+        html += f"<tr class='{' '.join(row_classes)}'>"
 
         for col_name, value in row.items():
             cell_class = ""
 
             # Apply performance highlighting
-            if col_name in perf_data and row["Type"] != "Separator":
+            if col_name in perf_data and row.get("Type") != "Separator":
                 col_perf = perf_data[col_name]
                 if idx == col_perf.get("best"):
                     cell_class = "best"
@@ -1149,7 +1538,9 @@ def main():
     }
 
     # Save files
-    save_excel_with_formatting(summary_df, dataset_dfs, perf_data, output_dir)
+    save_excel_with_formatting(
+        summary_df, dataset_dfs, mteb_dfs, mteb_multilingual_dfs, mteb_multilingual_datasets_dfs, perf_data, output_dir
+    )
     save_html_with_tabs(
         summary_df,
         dataset_dfs,
