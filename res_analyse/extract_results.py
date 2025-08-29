@@ -257,7 +257,7 @@ def load_mteb_multilingual_results(model_dir, context_length):
     mteb_path = os.path.join(RESULTS_DIR, model_dir, f"MTEB_{context_length}")
 
     if not os.path.exists(mteb_path):
-        return {}, {}, None
+        return {}, {}, None, None
 
     # Load language-specific averages and datasets
     language_averages = {}
@@ -277,6 +277,7 @@ def load_mteb_multilingual_results(model_dir, context_length):
                                 "ndcg_at_10", data["scores"]["test"][0]["main_score"]
                             ),
                         }
+
             except (json.JSONDecodeError, KeyError, IndexError):
                 continue
 
@@ -288,34 +289,98 @@ def load_mteb_multilingual_results(model_dir, context_length):
                 try:
                     with open(json_file) as f:
                         data = json.load(f)
-                        if "scores" in data and "test" in data["scores"] and data["scores"]["test"]:
-                            # For multilingual datasets, find the score for this language
-                            for result in data["scores"]["test"]:
-                                # Match language code or language name
+
+                        # Collect scores from test, dev, and validation splits
+                        all_score_entries = []
+                        if "scores" in data:
+                            if "test" in data["scores"] and data["scores"]["test"]:
+                                all_score_entries.extend(data["scores"]["test"])
+                            if "dev" in data["scores"] and data["scores"]["dev"]:
+                                all_score_entries.extend(data["scores"]["dev"])
+                            if "validation" in data["scores"] and data["scores"]["validation"]:
+                                all_score_entries.extend(data["scores"]["validation"])
+
+                        if all_score_entries:
+                            # Find all matching entries for this language
+                            matching_entries = []
+                            for result in all_score_entries:
                                 result_langs = result.get("languages", [])
-                                if any(lang_code in lang.lower() for lang in result_langs):
-                                    lang_dataset_data[dataset] = {
-                                        "main_score": result["main_score"],
-                                        "ndcg_at_10": result.get("ndcg_at_10", result["main_score"]),
-                                    }
-                                    break
+                                lang_matched = False
+                                if result_langs:
+                                    for lang in result_langs:
+                                        lang_lower = lang.lower()
+                                        # Try multiple matching patterns
+                                        if (
+                                            lang_code in lang_lower
+                                            or lang_code == lang_lower
+                                            or lang_lower.startswith(lang_code)
+                                            or lang_lower.endswith(lang_code)
+                                        ):
+                                            lang_matched = True
+                                            break
+                                else:
+                                    # If no language info, include it (for backward compatibility)
+                                    lang_matched = True
+
+                                if lang_matched:
+                                    matching_entries.append(result)
+
+                            # Average all matching entries for this dataset+language
+                            if matching_entries:
+                                avg_main_score = sum(entry["main_score"] for entry in matching_entries) / len(
+                                    matching_entries
+                                )
+                                avg_ndcg_score = sum(
+                                    entry.get("ndcg_at_10", entry["main_score"]) for entry in matching_entries
+                                ) / len(matching_entries)
+
+                                lang_dataset_data[dataset] = {
+                                    "main_score": avg_main_score,
+                                    "ndcg_at_10": avg_ndcg_score,
+                                }
+
                 except (json.JSONDecodeError, KeyError, IndexError):
                     continue
 
         if lang_dataset_data:
             language_datasets[lang_code] = lang_dataset_data
 
-    # Calculate global average across all languages
-    global_average = None
-    if language_averages:
-        all_scores = [data["main_score"] for data in language_averages.values()]
-        if all_scores:
-            global_average = {
-                "main_score": sum(all_scores) / len(all_scores),
-                "ndcg_at_10": sum(all_scores) / len(all_scores),
-            }
+    # Load English average for inclusion in global average
+    english_average = None
+    eng_avg_file = os.path.join(mteb_path, "Average_EN_V2_RETRIEVAL_TASKS.json")
+    if os.path.exists(eng_avg_file):
+        try:
+            with open(eng_avg_file) as f:
+                data = json.load(f)
+                if "scores" in data and "test" in data["scores"] and data["scores"]["test"]:
+                    english_average = {
+                        "main_score": data["scores"]["test"][0]["main_score"],
+                        "ndcg_at_10": data["scores"]["test"][0].get(
+                            "ndcg_at_10", data["scores"]["test"][0]["main_score"]
+                        ),
+                    }
+        except (json.JSONDecodeError, KeyError, IndexError):
+            pass
 
-    return language_averages, language_datasets, global_average
+    # Calculate global average across all languages INCLUDING English
+    global_average = None
+    all_scores = []
+
+    # Add multilingual language scores
+    if language_averages:
+        all_scores.extend([data["main_score"] for data in language_averages.values()])
+
+    # Add English score
+    if english_average:
+        all_scores.append(english_average["main_score"])
+
+    if all_scores:
+        global_average = {
+            "main_score": sum(all_scores) / len(all_scores),
+            "ndcg_at_10": sum(all_scores) / len(all_scores),
+        }
+
+    return language_averages, language_datasets, global_average, english_average
 
 
 def format_value(value, decimal_places=2):
@@ -350,13 +415,18 @@ def extract_all_data():
                 english_average, english_datasets = load_mteb_english_results(model_dir, context_length)
 
                 # Load MTEB multilingual results
-                multilingual_averages, multilingual_datasets, global_average = load_mteb_multilingual_results(
-                    model_dir, context_length
+                multilingual_averages, multilingual_datasets, global_average, multilingual_english_average = (
+                    load_mteb_multilingual_results(model_dir, context_length)
                 )
             else:
                 # No MTEB data for 512 context
                 english_average, english_datasets = None, {}
-                multilingual_averages, multilingual_datasets, global_average = {}, {}, None
+                multilingual_averages, multilingual_datasets, global_average, multilingual_english_average = (
+                    {},
+                    {},
+                    None,
+                    None,
+                )
 
             all_data[model_name][context_length] = {
                 "mean": mean_data,
@@ -366,6 +436,7 @@ def extract_all_data():
                 "mteb_multilingual_averages": multilingual_averages,
                 "mteb_multilingual_datasets": multilingual_datasets,
                 "mteb_global_average": global_average,
+                "mteb_multilingual_english_average": multilingual_english_average,
             }
 
     return models, all_data
@@ -643,6 +714,7 @@ def create_mteb_multilingual_table(models, all_data, context_length):
     for model_name in sorted(models["custom"]):
         multilingual_averages = all_data[model_name][context_length]["mteb_multilingual_averages"]
         global_average = all_data[model_name][context_length]["mteb_global_average"]
+        multilingual_english_average = all_data[model_name][context_length]["mteb_multilingual_english_average"]
 
         # Get FLOPS from NanoBEIR 256 context
         nanobeir_256_data = all_data[model_name][256]["mean"]
@@ -652,34 +724,46 @@ def create_mteb_multilingual_table(models, all_data, context_length):
             if not pd.isna(flops_raw):
                 flops_value = format_value(flops_raw)
 
-        # Check if model has any MTEB data
-        has_any_data = False
+        # Check if model has any multilingual data (DEU, FRA, SPA)
+        has_multilingual_data = False
 
         # Add global average first (right after FLOPS)
         if global_average is not None:
             global_avg_score = format_value(global_average.get("main_score", np.nan) * 100)
-            has_any_data = True
         else:
             global_avg_score = "N/A"
 
         row = {"Model": model_name, "Type": "Custom", "FLOPS": flops_value, "Global_Average": global_avg_score}
 
-        # Add language-specific averages
+        # Add English average
+        if multilingual_english_average is not None:
+            english_score = format_value(multilingual_english_average.get("main_score", np.nan) * 100)
+            row["ENG_Avg"] = english_score
+        else:
+            row["ENG_Avg"] = "N/A"
+
+        # Add language-specific averages and check for multilingual data
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
             if lang_code in multilingual_averages:
                 score = format_value(multilingual_averages[lang_code].get("main_score", np.nan) * 100)
                 row[f"{lang_code.upper()}_Avg"] = score
-                has_any_data = True
+                has_multilingual_data = True  # Found data for at least one multilingual language
             else:
                 row[f"{lang_code.upper()}_Avg"] = "N/A"
 
-        # Only add row if it has any MTEB data
-        if has_any_data:
+        # Only add row if it has multilingual data (DEU, FRA, or SPA)
+        if has_multilingual_data:
             rows.append(row)
 
     # Separator
     if models["custom"] and models["pretrained"] and rows:  # Only add separator if there are custom models with data
-        sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator", "FLOPS": "---", "Global_Average": "---"}
+        sep_row = {
+            "Model": "--- PRETRAINED MODELS ---",
+            "Type": "Separator",
+            "FLOPS": "---",
+            "Global_Average": "---",
+            "ENG_Avg": "---",
+        }
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
             sep_row[f"{lang_code.upper()}_Avg"] = "---"
         rows.append(sep_row)
@@ -688,6 +772,7 @@ def create_mteb_multilingual_table(models, all_data, context_length):
     for model_name in sorted(models["pretrained"]):
         multilingual_averages = all_data[model_name][context_length]["mteb_multilingual_averages"]
         global_average = all_data[model_name][context_length]["mteb_global_average"]
+        multilingual_english_average = all_data[model_name][context_length]["mteb_multilingual_english_average"]
 
         # Get FLOPS from NanoBEIR 256 context
         nanobeir_256_data = all_data[model_name][256]["mean"]
@@ -697,29 +782,35 @@ def create_mteb_multilingual_table(models, all_data, context_length):
             if not pd.isna(flops_raw):
                 flops_value = format_value(flops_raw)
 
-        # Check if model has any MTEB data
-        has_any_data = False
+        # Check if model has any multilingual data (DEU, FRA, SPA)
+        has_multilingual_data = False
 
         # Add global average first (right after FLOPS)
         if global_average is not None:
             global_avg_score = format_value(global_average.get("main_score", np.nan) * 100)
-            has_any_data = True
         else:
             global_avg_score = "N/A"
 
         row = {"Model": model_name, "Type": "Pretrained", "FLOPS": flops_value, "Global_Average": global_avg_score}
 
-        # Add language-specific averages
+        # Add English average
+        if multilingual_english_average is not None:
+            english_score = format_value(multilingual_english_average.get("main_score", np.nan) * 100)
+            row["ENG_Avg"] = english_score
+        else:
+            row["ENG_Avg"] = "N/A"
+
+        # Add language-specific averages and check for multilingual data
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
             if lang_code in multilingual_averages:
                 score = format_value(multilingual_averages[lang_code].get("main_score", np.nan) * 100)
                 row[f"{lang_code.upper()}_Avg"] = score
-                has_any_data = True
+                has_multilingual_data = True  # Found data for at least one multilingual language
             else:
                 row[f"{lang_code.upper()}_Avg"] = "N/A"
 
-        # Only add row if it has any MTEB data
-        if has_any_data:
+        # Only add row if it has multilingual data (DEU, FRA, or SPA)
+        if has_multilingual_data:
             rows.append(row)
 
     return pd.DataFrame(rows)
@@ -751,6 +842,8 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
         multilingual_datasets = all_data[model_name][context_length]["mteb_multilingual_datasets"]
         multilingual_averages = all_data[model_name][context_length]["mteb_multilingual_averages"]
         global_average = all_data[model_name][context_length]["mteb_global_average"]
+        multilingual_english_average = all_data[model_name][context_length]["mteb_multilingual_english_average"]
+        english_datasets = all_data[model_name][context_length]["mteb_english_datasets"]
 
         # Get FLOPS from NanoBEIR 256 context
         nanobeir_256_data = all_data[model_name][256]["mean"]
@@ -760,17 +853,31 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
             if not pd.isna(flops_raw):
                 flops_value = format_value(flops_raw)
 
-        # Check if model has any MTEB data
-        has_any_data = False
+        # Check if model has any multilingual data (DEU, FRA, SPA)
+        has_multilingual_data = False
 
         # Add global average first (right after FLOPS)
         if global_average is not None:
             global_avg_score = format_value(global_average.get("main_score", np.nan) * 100)
-            has_any_data = True
         else:
             global_avg_score = "N/A"
 
         row = {"Model": model_name, "Type": "Custom", "FLOPS": flops_value, "Global_Average": global_avg_score}
+
+        # Add English average and datasets
+        if multilingual_english_average is not None:
+            english_score = format_value(multilingual_english_average.get("main_score", np.nan) * 100)
+            row["ENG_Avg"] = english_score
+        else:
+            row["ENG_Avg"] = "N/A"
+
+        # Add English individual datasets
+        for dataset in MTEB_ENGLISH_DATASETS:
+            if dataset in english_datasets:
+                score = format_value(english_datasets[dataset].get("main_score", np.nan) * 100)
+                row[f"ENG_{dataset}"] = score
+            else:
+                row[f"ENG_{dataset}"] = "N/A"
 
         # Add columns for each language and dataset combination
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
@@ -778,7 +885,7 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
             if lang_code in multilingual_averages:
                 score = format_value(multilingual_averages[lang_code].get("main_score", np.nan) * 100)
                 row[f"{lang_code.upper()}_Avg"] = score
-                has_any_data = True
+                has_multilingual_data = True  # Found data for at least one multilingual language
             else:
                 row[f"{lang_code.upper()}_Avg"] = "N/A"
 
@@ -788,17 +895,27 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
                 if dataset in lang_datasets:
                     score = format_value(lang_datasets[dataset].get("main_score", np.nan) * 100)
                     row[f"{lang_code.upper()}_{dataset}"] = score
-                    has_any_data = True
+                    has_multilingual_data = True  # Found data for at least one multilingual language
                 else:
                     row[f"{lang_code.upper()}_{dataset}"] = "N/A"
 
-        # Only add row if it has any MTEB data
-        if has_any_data:
+        # Only add row if it has multilingual data (DEU, FRA, or SPA)
+        if has_multilingual_data:
             rows.append(row)
 
     # Separator
     if models["custom"] and models["pretrained"] and rows:  # Only add separator if there are custom models with data
-        sep_row = {"Model": "--- PRETRAINED MODELS ---", "Type": "Separator", "FLOPS": "---", "Global_Average": "---"}
+        sep_row = {
+            "Model": "--- PRETRAINED MODELS ---",
+            "Type": "Separator",
+            "FLOPS": "---",
+            "Global_Average": "---",
+            "ENG_Avg": "---",
+        }
+        # Add English dataset separators
+        for dataset in MTEB_ENGLISH_DATASETS:
+            sep_row[f"ENG_{dataset}"] = "---"
+        # Add multilingual separators
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
             sep_row[f"{lang_code.upper()}_Avg"] = "---"
             for dataset in LANGUAGE_CONFIGS[lang_code]["tasks"]:
@@ -810,6 +927,8 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
         multilingual_datasets = all_data[model_name][context_length]["mteb_multilingual_datasets"]
         multilingual_averages = all_data[model_name][context_length]["mteb_multilingual_averages"]
         global_average = all_data[model_name][context_length]["mteb_global_average"]
+        multilingual_english_average = all_data[model_name][context_length]["mteb_multilingual_english_average"]
+        english_datasets = all_data[model_name][context_length]["mteb_english_datasets"]
 
         # Get FLOPS from NanoBEIR 256 context
         nanobeir_256_data = all_data[model_name][256]["mean"]
@@ -819,17 +938,31 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
             if not pd.isna(flops_raw):
                 flops_value = format_value(flops_raw)
 
-        # Check if model has any MTEB data
-        has_any_data = False
+        # Check if model has any multilingual data (DEU, FRA, SPA)
+        has_multilingual_data = False
 
         # Add global average first (right after FLOPS)
         if global_average is not None:
             global_avg_score = format_value(global_average.get("main_score", np.nan) * 100)
-            has_any_data = True
         else:
             global_avg_score = "N/A"
 
         row = {"Model": model_name, "Type": "Pretrained", "FLOPS": flops_value, "Global_Average": global_avg_score}
+
+        # Add English average and datasets
+        if multilingual_english_average is not None:
+            english_score = format_value(multilingual_english_average.get("main_score", np.nan) * 100)
+            row["ENG_Avg"] = english_score
+        else:
+            row["ENG_Avg"] = "N/A"
+
+        # Add English individual datasets
+        for dataset in MTEB_ENGLISH_DATASETS:
+            if dataset in english_datasets:
+                score = format_value(english_datasets[dataset].get("main_score", np.nan) * 100)
+                row[f"ENG_{dataset}"] = score
+            else:
+                row[f"ENG_{dataset}"] = "N/A"
 
         # Add columns for each language and dataset combination
         for lang_code in sorted(LANGUAGE_CONFIGS.keys()):
@@ -837,7 +970,7 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
             if lang_code in multilingual_averages:
                 score = format_value(multilingual_averages[lang_code].get("main_score", np.nan) * 100)
                 row[f"{lang_code.upper()}_Avg"] = score
-                has_any_data = True
+                has_multilingual_data = True  # Found data for at least one multilingual language
             else:
                 row[f"{lang_code.upper()}_Avg"] = "N/A"
 
@@ -847,12 +980,12 @@ def create_mteb_multilingual_datasets_table(models, all_data, context_length):
                 if dataset in lang_datasets:
                     score = format_value(lang_datasets[dataset].get("main_score", np.nan) * 100)
                     row[f"{lang_code.upper()}_{dataset}"] = score
-                    has_any_data = True
+                    has_multilingual_data = True  # Found data for at least one multilingual language
                 else:
                     row[f"{lang_code.upper()}_{dataset}"] = "N/A"
 
-        # Only add row if it has any MTEB data
-        if has_any_data:
+        # Only add row if it has multilingual data (DEU, FRA, or SPA)
+        if has_multilingual_data:
             rows.append(row)
 
     return pd.DataFrame(rows)
@@ -1272,8 +1405,8 @@ def save_html_with_tabs(
             <button class="tab" onclick="openTab(event, 'datasets_256')">📋 NanoBEIR 256</button>
             <button class="tab" onclick="openTab(event, 'datasets_512')">📋 NanoBEIR 512</button>
             <button class="tab" onclick="openTab(event, 'mteb_256')">🎯 MTEB English 256</button>
-            {'<button class="tab" onclick="openTab(event, \'mteb_multilingual_256\')">🌍 MTEB Multilingual Avg 256</button>' if not mteb_multilingual_dfs[256].empty else ""}
-            {'<button class="tab" onclick="openTab(event, \'mteb_multilingual_datasets_256\')">📊 MTEB Multilingual Datasets 256</button>' if not mteb_multilingual_datasets_dfs[256].empty else ""}
+                        {'''<button class="tab" onclick="openTab(event, 'mteb_multilingual_256')">🌍 MTEB Multilingual Avg 256</button>''' if not mteb_multilingual_dfs[256].empty else ""}
+            {'''<button class="tab" onclick="openTab(event, 'mteb_multilingual_datasets_256')">📊 MTEB Multilingual Datasets 256</button>''' if not mteb_multilingual_datasets_dfs[256].empty else ""}
         </div>
 
         <div id="summary" class="tabcontent active">
@@ -1304,7 +1437,7 @@ def save_html_with_tabs(
     </html>
     """
 
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf8") as f:
         f.write(html_content)
     print(f"Saved HTML: {filename}")
 

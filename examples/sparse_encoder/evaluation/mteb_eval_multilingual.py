@@ -132,11 +132,13 @@ def calculate_language_averages(language_code, output_dir="results"):
         # Extract all numeric metrics from both test and dev scores
         score_entries = []
 
-        # Collect from both test and dev if available
+        # Collect from test, dev, and validation if available
         if "test" in data["scores"] and data["scores"]["test"]:
             score_entries.extend(data["scores"]["test"])
         if "dev" in data["scores"] and data["scores"]["dev"]:
             score_entries.extend(data["scores"]["dev"])
+        if "validation" in data["scores"] and data["scores"]["validation"]:
+            score_entries.extend(data["scores"]["validation"])
 
         if not score_entries:
             print(f"Warning: No valid scores found in {filename}")
@@ -158,16 +160,22 @@ def calculate_language_averages(language_code, output_dir="results"):
             else:
                 # If no language info, include it (backward compatibility)
                 matching_entries.append(entry)
-
         if not matching_entries:
             print(f"Warning: No score entries found for language {language_code} in {filename}")
             continue
 
-        # Average numeric metrics across all matching entries for this file
+        # Average numeric metrics per dataset (dev+test+validation first, then collect for cross-dataset averaging)
+        # Calculate average for this dataset (across dev/test/validation if multiple entries)
+        dataset_metrics = defaultdict(list)
         for entry in matching_entries:
             for key, value in entry.items():
                 if isinstance(value, (int, float)):
-                    all_metrics[key].append(value)
+                    dataset_metrics[key].append(value)
+
+        # Average dev+test+validation for this dataset, then add to cross-dataset collection
+        for key, values in dataset_metrics.items():
+            dataset_avg = sum(values) / len(values)
+            all_metrics[key].append(dataset_avg)
 
     # Calculate averages
     averaged_metrics = {}
@@ -178,11 +186,13 @@ def calculate_language_averages(language_code, output_dir="results"):
     # Use the same logic as above to get the appropriate scores
     score_entries = []
 
-    # Collect from both test and dev if available
+    # Collect from test, dev, and validation if available
     if "test" in first_file_data["scores"] and first_file_data["scores"]["test"]:
         score_entries.extend(first_file_data["scores"]["test"])
     if "dev" in first_file_data["scores"] and first_file_data["scores"]["dev"]:
         score_entries.extend(first_file_data["scores"]["dev"])
+    if "validation" in first_file_data["scores"] and first_file_data["scores"]["validation"]:
+        score_entries.extend(first_file_data["scores"]["validation"])
 
     if score_entries:
         # Filter entries that match the target language (same logic as above)
